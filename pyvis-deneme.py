@@ -19,6 +19,7 @@ net_html = net.show("graph.html")
 
 # Create Dash app
 app = dash.Dash(__name__)
+server = app.server
 
 app.layout = html.Div([
     html.Iframe(srcDoc=open('graph.html', 'r').read(), style={'width': '100%', 'height': '600px'})

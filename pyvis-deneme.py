@@ -12,9 +12,9 @@ from pyvis.network import Network
 
 # Create Pyvis Network graph
 net = Network(notebook=True)
-net.add_node(1)
-net.add_node(2)
-net.add_edge(1, 2)
+net.add_node('Pelin')
+net.add_node('Volkan')
+net.add_edge('Pelin', 'Volkan')
 net_html = net.show("graph.html")
 
 # Create Dash app

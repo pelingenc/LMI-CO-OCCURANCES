@@ -288,8 +288,6 @@
 
 ################################################################### TRINO-REAL ##############################################################
 
-
-
 import os
 from trino.dbapi import connect
 from trino.auth import BasicAuthentication
@@ -315,7 +313,8 @@ def fetch_and_process_data(trino_user, trino_password):
             catalog="catalog"
         )
         cur = conn.cursor()
-
+        print('Data is loading.')
+        
         def execute_query_to_df(query):
             cur.execute(query)
             rows = cur.fetchall()
@@ -323,20 +322,20 @@ def fetch_and_process_data(trino_user, trino_password):
             return pd.DataFrame(rows, columns=columns)
 
         icd_query = """
-        select
-            encounter.subject.reference as PatientID,
-            encounter.id as encounter_ressource_id,
-            concat('C', condition_coding.code) as Codes,
-            condition.onsetdatetime as timestamp
-        from
+        SELECT
+            encounter.subject.reference AS PatientID,
+            encounter.id AS encounter_ressource_id,
+            CONCAT('C', condition_coding.code) AS Codes,
+            condition.onsetdatetime AS timestamp
+        FROM
             fhir.qs.Encounter encounter
-            left join unnest(encounter.diagnosis) as encounter_diagnosis on true
-            left join fhir.qs.Condition condition on encounter_diagnosis.condition.reference = concat('Condition/', condition.id)
-            left join unnest(condition.code.coding) as condition_coding on true
-        where
-            condition_coding.code is not null
-            and condition_coding.system = 'http://fhir.de/CodeSystem/bfarm/icd-10-gm'
-            and (
+            LEFT JOIN UNNEST(encounter.diagnosis) AS encounter_diagnosis ON TRUE
+            LEFT JOIN fhir.qs.Condition condition ON encounter_diagnosis.condition.reference = CONCAT('Condition/', condition.id)
+            LEFT JOIN UNNEST(condition.code.coding) AS condition_coding ON TRUE
+        WHERE
+            condition_coding.code IS NOT NULL
+            AND condition_coding.system = 'http://fhir.de/CodeSystem/bfarm/icd-10-gm'
+            AND (
                 FROM_ISO8601_TIMESTAMP(condition.onsetdatetime) BETWEEN DATE('2023-01-01')
                 AND DATE('2023-12-31')
             )
@@ -344,20 +343,20 @@ def fetch_and_process_data(trino_user, trino_password):
         """
 
         ops_query = """
-        select
-            encounter.subject.reference as PatientID,
-            encounter.id as encounter_ressource_id,
-            concat('P', procedure_coding.code) as Codes,
-            procedure.performeddatetime as timestamp
-        from
+        SELECT
+            encounter.subject.reference AS PatientID,
+            encounter.id AS encounter_ressource_id,
+            CONCAT('P', procedure_coding.code) AS Codes,
+            procedure.performeddatetime AS timestamp
+        FROM
             fhir.qs.Encounter encounter
-            left join unnest(encounter.diagnosis) as encounter_diagnosis on true
-            left join fhir.qs.procedure procedure on encounter.subject.reference = procedure.subject.reference
-            left join unnest(procedure.code.coding) as procedure_coding on true
-        where
-            procedure_coding.code is not null
-            and procedure_coding.system = 'http://fhir.de/CodeSystem/bfarm/ops'
-            and (
+            LEFT JOIN UNNEST(encounter.diagnosis) AS encounter_diagnosis ON TRUE
+            LEFT JOIN fhir.qs.procedure procedure ON encounter.subject.reference = procedure.subject.reference
+            LEFT JOIN UNNEST(procedure.code.coding) AS procedure_coding ON TRUE
+        WHERE
+            procedure_coding.code IS NOT NULL
+            AND procedure_coding.system = 'http://fhir.de/CodeSystem/bfarm/ops'
+            AND (
                 FROM_ISO8601_TIMESTAMP(procedure.performeddatetime) BETWEEN DATE('2023-01-01')
                 AND DATE('2023-12-31')
             )
@@ -365,20 +364,20 @@ def fetch_and_process_data(trino_user, trino_password):
         """
 
         loinc_query = """
-        select
-            encounter.subject.reference as PatientID,
-            encounter.id as encounter_ressource_id,
-            concat('O', observation_coding.code) as Codes,
-            observation.effectivedatetime as timestamp
-        from
+        SELECT
+            encounter.subject.reference AS PatientID,
+            encounter.id AS encounter_ressource_id,
+            CONCAT('O', observation_coding.code) AS Codes,
+            observation.effectivedatetime AS timestamp
+        FROM
             fhir.qs.Encounter encounter
-            left join unnest(encounter.diagnosis) as encounter_diagnosis on true
-            left join fhir.qs.observation observation on encounter.subject.reference = observation.subject.reference
-            left join unnest(observation.code.coding) as observation_coding on true
-        where
-            observation_coding.code is not null
-            and observation_coding.system = 'http://loinc.org'
-            and (
+            LEFT JOIN UNNEST(encounter.diagnosis) AS encounter_diagnosis ON TRUE
+            LEFT JOIN fhir.qs.observation observation ON encounter.subject.reference = observation.subject.reference
+            LEFT JOIN UNNEST(observation.code.coding) AS observation_coding ON TRUE
+        WHERE
+            observation_coding.code IS NOT NULL
+            AND observation_coding.system = 'http://loinc.org'
+            AND (
                 FROM_ISO8601_TIMESTAMP(observation.effectivedatetime) BETWEEN DATE('2023-01-01')
                 AND DATE('2023-12-31')
             )
@@ -392,8 +391,10 @@ def fetch_and_process_data(trino_user, trino_password):
         loinc_df = execute_query_to_df(loinc_query)
         loinc_df['ResourceType'] = 'LOINC'
 
-        # Create combined DataFrame and co-occurrence matrices
         flat_df = pd.concat([icd_df, ops_df, loinc_df], ignore_index=True)
+        print('Data is loaded.')
+
+        # Create co-occurrence matrices
         co_occurrence_matrices = {}
         for r in [flat_df, icd_df, loinc_df, ops_df]:
             icd_patient = r.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
@@ -413,10 +414,10 @@ def fetch_and_process_data(trino_user, trino_password):
         cur.close()
         conn.close()
 
-        return co_occurrence_matrices
+        return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
     except Exception as e:
         print(f"Error: {e}")
-        return {'Main': pd.DataFrame(), 'ICD': pd.DataFrame(), 'LOINC': pd.DataFrame(), 'OPS': pd.DataFrame()}
+        return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'ICD': pd.DataFrame(), 'LOINC': pd.DataFrame(), 'OPS': pd.DataFrame()}}
 
 # Dash application setup
 app = dash.Dash(__name__)
@@ -425,21 +426,12 @@ server = app.server
 app.layout = html.Div([
     html.H1("Co-Occurrences in FHIR Codes"),
     html.Div([
-        html.Label("Enter your Trino credentials:"),
+        html.Label("Enter Trino credentials:"),
         dcc.Input(id='trino-user', type='text', placeholder='Username'),
         dcc.Input(id='trino-password', type='password', placeholder='Password'),
-        html.Button('Login', id='login-button', n_clicks=0),
-        html.Div(id='login-error', style={'color': 'red'}),
+        html.Button('Login', id='login-button'),
+        html.Div(id='login-feedback', children='', style={'color': 'red'}),
     ]),
-    dcc.Store(id='data-store'),  # Hidden store to keep data
-    dcc.Loading(
-        id="loading",
-        type="circle",
-        children=[
-            html.Div(id='data-container', style={'display': 'none'}),
-            html.Div(id='data-loading-message', children='Data is still loading...')
-        ]
-    ),
     html.Div([
         html.Label("Select the number of nodes to visualize:"),
         dcc.Slider(
@@ -456,7 +448,7 @@ app.layout = html.Div([
         html.Label("Select a code:"),
         dcc.Dropdown(
             id='code-dropdown',
-            options=[],
+            options=[],  # Options will be populated after login
             placeholder="Select a code",
             clearable=False
         )
@@ -464,49 +456,71 @@ app.layout = html.Div([
     dcc.Checklist(
         id='show-labels',
         options=[{'label': 'Show Labels', 'value': 'show'}],
-        value=[],  # Start with an empty list so labels are not shown by default
+        value=[]  # Start with an empty list so labels are not shown by default
     ),
-    html.Iframe(id='graph-iframe', style={'width': '100%', 'height': '600px'})
+    dcc.Loading(
+        id="loading",
+        type="circle",
+        children=[
+            html.Div(id='data-container', style={'display': 'none'}),
+            html.Div(id='data-loading-message', children='Data is still loading...')
+        ]
+    ),
+    html.Iframe(id='graph-iframe', style={'width': '100%', 'height': '600px'}),
+    dcc.Store(id='data-store')  # Hidden store to keep data
 ])
 
+
 @app.callback(
-    [Output('login-error', 'children'),
-     Output('data-container', 'style'),
-     Output('code-dropdown', 'options'),
-     Output('data-store', 'data')],
+    Output('login-feedback', 'children'),
+    Output('data-container', 'style'),
+    Output('code-dropdown', 'options'),
+    Output('data-store', 'data'),
     Input('login-button', 'n_clicks'),
     State('trino-user', 'value'),
     State('trino-password', 'value')
 )
 def login(n_clicks, username, password):
-    if n_clicks > 0:
-        try:
-            # Start by showing the loading message and spinner
-            co_occurrence_matrices = fetch_and_process_data(username, password)
-            code_options = [{'label': code[2:], 'value': code} for code in co_occurrence_matrices['Main'].columns]
-            return '', {'display': 'block'}, code_options, {'co_occurrence_matrices': co_occurrence_matrices}
-        except ValueError as e:
-            return str(e), {'display': 'none'}, [], {}
-    return '', {'display': 'none'}, [], {}
+    feedback_message = ""
+    data_style = {'display': 'none'}
+    options = []
+    data = {}
+
+    if n_clicks is not None and n_clicks > 0:
+        if username and password:
+            result = fetch_and_process_data(username, password)
+            if result['success']:
+                co_occurrence_matrices = result['data']
+                options = [{'label': code, 'value': code} for code in co_occurrence_matrices['Main'].columns]
+                feedback_message = result['message']
+                data_style = {'display': 'block'}
+                data = {'co_occurrence_matrices': co_occurrence_matrices}
+            else:
+                feedback_message = result['message']
+        else:
+            feedback_message = "Please provide both username and password."
+
+    return feedback_message, data_style, options, data
+
 
 @app.callback(
     Output('graph-iframe', 'srcDoc'),
-    [Input('code-dropdown', 'value'),
-     Input('num-nodes-slider', 'value'),
-     Input('show-labels', 'value')],
-    [State('data-store', 'data')]
+    Input('code-dropdown', 'value'),
+    Input('num-nodes-slider', 'value'),
+    Input('show-labels', 'value'),
+    State('data-store', 'data')
 )
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     if not selected_code or not data or 'co_occurrence_matrices' not in data:
-        return "Data is still loading"
+        return ""
 
     co_occurrence_matrices = data.get('co_occurrence_matrices', {})
     if not co_occurrence_matrices:
-        return "Data is still loading"
+        return ""
 
     main_df = co_occurrence_matrices.get('Main', pd.DataFrame())
     if main_df.empty:
-        return "Data is still loading"
+        return ""
 
     net = Network(notebook=True)
     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
@@ -539,36 +553,16 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     if 'OPS' in co_occurrence_matrices:
         add_nodes_edges(net, co_occurrence_matrices['OPS'], 'P', 'OPS')
 
-    # Additional Pyvis settings
-    # net.show_buttons(filter_=['physics'])
-    # net.force_atlas_2based()
-    # net.set_options("""
-    # var options = {
-    #   "nodes": {
-    #     "size": 20
-    #   },
-    #   "edges": {
-    #     "width": 1
-    #   },
-    #   "physics": {
-    #     "enabled": true
-    #   }
-    # }
-    # """)
-
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
     temp_file_name = temp_file.name
     temp_file.close()
 
     net.show(temp_file_name)
-    with open(temp_file_name, 'r') as f:
-        return f.read()
+    return open(temp_file_name, 'r').read()
+
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8052)
-
-
-
+    app.run_server(debug=True,port=8052)
 
 # In[ ]:
 

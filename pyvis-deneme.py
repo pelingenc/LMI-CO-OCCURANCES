@@ -110,7 +110,7 @@ def load_data_and_create_graph(n_clicks):
     return loading_status, graph_layout
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8052)  # Use port 8051 instead of 8050
+    app.run_server(debug=True, port=8051)  # Use port 8051 instead of 8050
 
 
 # In[ ]:

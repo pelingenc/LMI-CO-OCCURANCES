@@ -417,9 +417,7 @@ def fetch_and_process_data(trino_user, trino_password):
 
         return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
     except Exception as e:
-        error_message = f"Error: {e}\n{traceback.format_exc()}"
-        print(error_message)
-        #print(f"Error: {e}")
+        print(f"Error: {e}")
         return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'ICD': pd.DataFrame(), 'LOINC': pd.DataFrame(), 'OPS': pd.DataFrame()}}
 
 # Dash application setup

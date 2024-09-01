@@ -93,7 +93,7 @@ def update_graph(n_clicks, selected_code, num_nodes_to_visualize, show_labels):
         return "", ""
 
     # Initialize a PyVis network
-    net = Network(notebook=False, cdn_resources='remote')
+    net = Network(notebook=True) #, cdn_resources='remote'
 
     # Example: Generating a graph
     try:

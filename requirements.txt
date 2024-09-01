@@ -1,4 +1,6 @@
 dash==2.11.1
+pandas
+numpy
 pyvis==0.1.9
 werkzeug==2.2.3
 gunicorn==20.1.0

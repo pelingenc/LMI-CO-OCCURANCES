@@ -288,6 +288,8 @@
 
 ################################################################### TRINO-REAL ##############################################################
 
+
+
 import os
 from trino.dbapi import connect
 from trino.auth import BasicAuthentication
@@ -390,9 +392,8 @@ def fetch_and_process_data(trino_user, trino_password):
         loinc_df = execute_query_to_df(loinc_query)
         loinc_df['ResourceType'] = 'LOINC'
 
+        # Create combined DataFrame and co-occurrence matrices
         flat_df = pd.concat([icd_df, ops_df, loinc_df], ignore_index=True)
-
-        # Create co-occurrence matrices
         co_occurrence_matrices = {}
         for r in [flat_df, icd_df, loinc_df, ops_df]:
             icd_patient = r.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
@@ -430,8 +431,15 @@ app.layout = html.Div([
         html.Button('Login', id='login-button', n_clicks=0),
         html.Div(id='login-error', style={'color': 'red'}),
     ]),
-    dcc.Store(id='data-store'),  # Add this line
-    html.Div(id='data-container', style={'display': 'none'}),
+    dcc.Store(id='data-store'),  # Hidden store to keep data
+    dcc.Loading(
+        id="loading",
+        type="circle",
+        children=[
+            html.Div(id='data-container', style={'display': 'none'}),
+            html.Div(id='data-loading-message', children='Data is still loading...')
+        ]
+    ),
     html.Div([
         html.Label("Select the number of nodes to visualize:"),
         dcc.Slider(
@@ -471,11 +479,9 @@ app.layout = html.Div([
     State('trino-password', 'value')
 )
 def login(n_clicks, username, password):
-    if n_clicks is None:
-        return '', {'display': 'none'}, [], {}
-
     if n_clicks > 0:
         try:
+            # Start by showing the loading message and spinner
             co_occurrence_matrices = fetch_and_process_data(username, password)
             code_options = [{'label': code[2:], 'value': code} for code in co_occurrence_matrices['Main'].columns]
             return '', {'display': 'block'}, code_options, {'co_occurrence_matrices': co_occurrence_matrices}
@@ -491,57 +497,60 @@ def login(n_clicks, username, password):
     State('data-store', 'data')
 )
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
-    if not selected_code or not data or 'co_occurrence_matrices' not in data:
+    if not selected_code or not data:
         return ""
 
     co_occurrence_matrices = data.get('co_occurrence_matrices', {})
-    if not co_occurrence_matrices:
-        return ""
-
-    main_df = co_occurrence_matrices.get('Main', pd.DataFrame())
-    if main_df.empty:
+    if 'Main' not in co_occurrence_matrices:
         return ""
 
     net = Network(notebook=True)
+    main_df = co_occurrence_matrices['Main']
+    
     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
-    top_neighbors = list(neighbors_sorted.index[:15])
+    top_nodes = neighbors_sorted.head(num_nodes_to_visualize).index.tolist()
 
-    def add_nodes_edges(graph, child_df, prefix, group_name):
-        top_neighbor = None
-        for neighbor_code in neighbors_sorted.index:
-            if neighbor_code.startswith(prefix):
-                top_neighbor = neighbor_code
-                break
+    G = nx.Graph()
+    for code in top_nodes:
+        G.add_node(code)
+        for neighbor in main_df.loc[code].sort_values(ascending=False).index:
+            if neighbor in top_nodes:
+                G.add_edge(code, neighbor, weight=main_df.loc[code, neighbor])
 
-        if top_neighbor:
-            net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
-            net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
-            net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
+    pos = nx.spring_layout(G)
+    edge_trace = []
+    for edge in G.edges(data=True):
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_trace.append((x0, y0, x1, y1, edge[2]['weight']))
 
-            top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
-            top_neighbors = list(top_neighbor_row.index[:num_nodes_to_visualize])
+    for x0, y0, x1, y1, weight in edge_trace:
+        net.add_edge(x0, y0, x1, y1, width=weight)
 
-            for neighbor in top_neighbors:
-                if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
-                    net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
-                    net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
+    net.show_buttons(filter_=['physics'])
+    net.force_atlas_2based()
+    net.set_options("""
+    var options = {
+      "nodes": {
+        "size": 20
+      },
+      "edges": {
+        "width": 1
+      },
+      "physics": {
+        "enabled": true
+      }
+    }
+    """)
 
-    if 'ICD' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['ICD'], 'C', 'ICD')
-    if 'LOINC' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['LOINC'], 'O', 'LOINC')
-    if 'OPS' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['OPS'], 'P', 'OPS')
-
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
-    temp_file_name = temp_file.name
-    temp_file.close()
-
-    net.show(temp_file_name)
-    return open(temp_file_name, 'r').read()
+    html_path = tempfile.mktemp(suffix=".html")
+    net.save_graph(html_path)
+    with open(html_path, 'r') as f:
+        return f.read()
 
 if __name__ == '__main__':
     app.run_server(debug=True, port=8052)
+
 
 
 

@@ -29,88 +29,139 @@
 #     app.run_server(debug=True)
 
 import dash
-from dash import html, dcc
-from dash.dependencies import Input, Output, State
+from dash import dcc, html, Input, Output, State
 import pandas as pd
+import numpy as np
 from pyvis.network import Network
-import time
+import base64
+import textwrap
 
-# Create Dash app
+# Sample data for demonstration purposes
+data = {
+    'Main': pd.DataFrame(np.random.randint(0, 10, size=(10, 10)), columns=[f'Code{i}' for i in range(10)], index=[f'Code{i}' for i in range(10)]),
+    'Condition': pd.DataFrame(np.random.randint(0, 10, size=(10, 10)), columns=[f'Code{i}' for i in range(10)], index=[f'Code{i}' for i in range(10)]),
+    'Observation': pd.DataFrame(np.random.randint(0, 10, size=(10, 10)), columns=[f'Code{i}' for i in range(10)], index=[f'Code{i}' for i in range(10)]),
+}
+
+SUBGROUP_COLORS = {
+    'Condition': "#00bfff",
+    'Observation': "#ffc0cb",
+}
+
 app = dash.Dash(__name__)
 server = app.server  # Required for deployment with Gunicorn
 
-# Global variable to store loaded data
-loaded_data = None
-
-# Initial layout with the "Load Data" button and placeholders for progress and graph
+# Initialize layout with default components
 app.layout = html.Div([
-    html.Button('Load Data', id='load-button'),
+    html.Div([
+        dcc.Dropdown(
+            id='code-dropdown',
+            options=[{'label': f'Code{i}', 'value': f'Code{i}'} for i in range(10)],
+            value='Code0',  # Default value
+        ),
+        dcc.Slider(
+            id='node-slider',
+            min=1,
+            max=10,
+            value=5,  # Default value
+            marks={i: str(i) for i in range(1, 11)},
+        ),
+        dcc.Checklist(
+            id='show-labels',
+            options=[{'label': 'Show Labels', 'value': 'show_labels'}],
+            value=['show_labels'],  # Default checked
+        ),
+        html.Button('Generate Graph', id='generate-button'),
+    ], style={'marginBottom': '20px'}),
+    html.Div(id='graph-container'),
     dcc.Loading(id="loading", type="default", children=[
         html.Div(id='loading-output'),
     ]),
-    html.Div(id='graph-container')
 ])
 
-# Callback to handle loading data and creating graph
 @app.callback(
-    Output('loading-output', 'children'),
-    Output('graph-container', 'children'),
-    Input('load-button', 'n_clicks'),
-    prevent_initial_call=True  # This prevents the callback from firing when the app first loads
+    [Output('graph-container', 'children'),
+     Output('loading-output', 'children')],
+    [Input('generate-button', 'n_clicks')],
+    [State('code-dropdown', 'value'),
+     State('node-slider', 'value'),
+     State('show-labels', 'value')],
 )
-def load_data_and_create_graph(n_clicks):
-    global loaded_data
-
-    if n_clicks is None:
+def update_graph(n_clicks, selected_code, num_nodes_to_visualize, show_labels):
+    if not n_clicks:
         return "", ""
 
-    # Simulate loading process with a progress message
-    loading_status = "Loading data... 0%"
-    time.sleep(1)
-    loading_status = "Loading data... 50%"
+    # Initialize a PyVis network
+    net = Network(notebook=False, cdn_resources='remote')
 
-    # Load data (using Iris dataset as an example)
+    # Example: Generating a graph
     try:
-        loaded_data = pd.read_csv(
-            'https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data',
-            header=None,
-            names=['sepal_length', 'sepal_width', 'petal_length', 'petal_width', 'species']
-        )
-        time.sleep(1)
-        loading_status = "Loading data... 100%"
+        # Get the main co-occurrence matrix
+        main_df = data['Main']
+
+        # Sort neighbors by descending order
+        neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
+        top_neighbors = list(neighbors_sorted.index[:15])
+
+        # Function to add nodes and edges to the PyVis network
+        def add_nodes_edges(child_df, prefix, group_name):
+            top_neighbor = None
+            for neighbor_code in neighbors_sorted.index:
+                if neighbor_code.startswith(prefix):
+                    top_neighbor = neighbor_code
+                    break
+
+            if top_neighbor:
+                selected_code_label = wrap_text(selected_code)
+                top_neighbor_label = wrap_text(top_neighbor)
+
+                net.add_node(selected_code, title=selected_code, label=selected_code_label if 'show_labels' in show_labels else selected_code[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+                net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor_label if 'show_labels' in show_labels else top_neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+                net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
+
+                top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
+                top_neighbors = list(top_neighbor_row.index[:num_nodes_to_visualize])
+
+                for neighbor in top_neighbors:
+                    if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
+                        neighbor_label = wrap_text(neighbor)
+                        net.add_node(neighbor, title=neighbor, label=neighbor_label if 'show_labels' in show_labels else neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+                        net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
+
+                        for other_code in top_neighbor_row.index[:num_nodes_to_visualize]:
+                            if other_code != neighbor and child_df.loc[neighbor, other_code] > 0:
+                                other_code_label = wrap_text(other_code)
+                                net.add_node(other_code, title=other_code, label=other_code_label if 'show_labels' in show_labels else other_code[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+                                net.add_edge(neighbor, other_code, value=int(child_df.loc[neighbor, other_code]))
+
+        if 'Condition' in data:
+            add_nodes_edges(data['Condition'], 'Co', 'Condition')
+        if 'Observation' in data:
+            add_nodes_edges(data['Observation'], 'Ob', 'Observation')
+
+        # Generate HTML content directly
+        graph_html = net.generate_html(notebook=False)
+
+        # Embed the HTML content directly into an iframe using a data URL
+        graph_base64 = base64.b64encode(graph_html.encode()).decode()
+        graph_layout = html.Div([
+            html.Iframe(
+                src=f"data:text/html;base64,{graph_base64}",
+                style={'width': '100%', 'height': '600px'}
+            )
+        ])
+
+        return graph_layout, "Graph generated successfully!"
+
     except Exception as e:
-        return f"Failed to load data: {e}", ""
+        return "", f"Error generating graph: {e}"
 
-    loading_status = "Loading complete!"
-
-    # Create Pyvis Network graph using the loaded data
-    net = Network(notebook=True)
-    species_set = loaded_data['species'].unique()
-    for species in species_set:
-        net.add_node(species, label=species)
-
-    # Example: Add edges between species (just for demonstration)
-    if len(species_set) > 1:
-        net.add_edge(species_set[0], species_set[1])
-    if len(species_set) > 2:
-        net.add_edge(species_set[1], species_set[2])
-
-    net.show("graph.html")  # Save graph to an HTML file
-
-    # Display the graph in an iframe
-    graph_layout = html.Div([
-        dcc.Dropdown(
-            id='combobox',
-            options=[{'label': species, 'value': species} for species in species_set],
-            value=species_set[0]  # Default to the first species
-        ),
-        html.Iframe(srcDoc=open('graph.html', 'r').read(), style={'width': '100%', 'height': '600px'})
-    ])
-
-    return loading_status, graph_layout
+def wrap_text(text, max_width=15):
+    """Wrap text to fit within a maximum width, defaulting to 15 characters."""
+    return "\n".join(textwrap.wrap(text, width=max_width))
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8051)  # Use port 8051 instead of 8050
+    app.run_server(debug=True, port=8051)
 
 
 # In[ ]:

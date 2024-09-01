@@ -254,7 +254,7 @@ def generate_graph(selected_code, num_nodes_to_visualize, show_labels):
     return open(temp_file_name, 'r').read()
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8051)
+    app.run_server(debug=True, port=8052)
 
 
 

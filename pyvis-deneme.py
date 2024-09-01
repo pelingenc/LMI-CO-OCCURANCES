@@ -144,7 +144,7 @@ def update_graph(n_clicks, selected_code, num_nodes_to_visualize, show_labels):
         graph_html = net.generate_html(notebook=False)
 
         # Display the graph in an iframe
-        graph_html = "<html><body><h1>Test Graph</h1></body></html>"
+        #graph_html = "<html><body><h1>Test Graph</h1></body></html>"
         graph_layout = html.Div([
             html.Iframe(srcDoc=graph_html, style={'width': '100%', 'height': '600px'})
         ])

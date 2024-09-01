@@ -491,61 +491,77 @@ def login(n_clicks, username, password):
 
 @app.callback(
     Output('graph-iframe', 'srcDoc'),
-    Input('code-dropdown', 'value'),
-    Input('num-nodes-slider', 'value'),
-    Input('show-labels', 'value'),
-    State('data-store', 'data')
+    [Input('code-dropdown', 'value'),
+     Input('num-nodes-slider', 'value'),
+     Input('show-labels', 'value')],
+    [State('data-store', 'data')]
 )
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
-    if not selected_code or not data:
-        return ""
+    if not selected_code or not data or 'co_occurrence_matrices' not in data:
+        return "Data is still loading"
 
     co_occurrence_matrices = data.get('co_occurrence_matrices', {})
-    if 'Main' not in co_occurrence_matrices:
-        return ""
+    if not co_occurrence_matrices:
+        return "Data is still loading"
+
+    main_df = co_occurrence_matrices.get('Main', pd.DataFrame())
+    if main_df.empty:
+        return "Data is still loading"
 
     net = Network(notebook=True)
-    main_df = co_occurrence_matrices['Main']
-    
     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
-    top_nodes = neighbors_sorted.head(num_nodes_to_visualize).index.tolist()
+    top_neighbors = list(neighbors_sorted.index[:15])
 
-    G = nx.Graph()
-    for code in top_nodes:
-        G.add_node(code)
-        for neighbor in main_df.loc[code].sort_values(ascending=False).index:
-            if neighbor in top_nodes:
-                G.add_edge(code, neighbor, weight=main_df.loc[code, neighbor])
+    def add_nodes_edges(graph, child_df, prefix, group_name):
+        top_neighbor = None
+        for neighbor_code in neighbors_sorted.index:
+            if neighbor_code.startswith(prefix):
+                top_neighbor = neighbor_code
+                break
 
-    pos = nx.spring_layout(G)
-    edge_trace = []
-    for edge in G.edges(data=True):
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_trace.append((x0, y0, x1, y1, edge[2]['weight']))
+        if top_neighbor:
+            net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+            net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+            net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
 
-    for x0, y0, x1, y1, weight in edge_trace:
-        net.add_edge(x0, y0, x1, y1, width=weight)
+            top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
+            top_neighbors = list(top_neighbor_row.index[:num_nodes_to_visualize])
 
-    net.show_buttons(filter_=['physics'])
-    net.force_atlas_2based()
-    net.set_options("""
-    var options = {
-      "nodes": {
-        "size": 20
-      },
-      "edges": {
-        "width": 1
-      },
-      "physics": {
-        "enabled": true
-      }
-    }
-    """)
+            for neighbor in top_neighbors:
+                if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
+                    net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+                    net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
 
-    html_path = tempfile.mktemp(suffix=".html")
-    net.save_graph(html_path)
-    with open(html_path, 'r') as f:
+    if 'ICD' in co_occurrence_matrices:
+        add_nodes_edges(net, co_occurrence_matrices['ICD'], 'C', 'ICD')
+    if 'LOINC' in co_occurrence_matrices:
+        add_nodes_edges(net, co_occurrence_matrices['LOINC'], 'O', 'LOINC')
+    if 'OPS' in co_occurrence_matrices:
+        add_nodes_edges(net, co_occurrence_matrices['OPS'], 'P', 'OPS')
+
+    # Additional Pyvis settings
+    # net.show_buttons(filter_=['physics'])
+    # net.force_atlas_2based()
+    # net.set_options("""
+    # var options = {
+    #   "nodes": {
+    #     "size": 20
+    #   },
+    #   "edges": {
+    #     "width": 1
+    #   },
+    #   "physics": {
+    #     "enabled": true
+    #   }
+    # }
+    # """)
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
+    temp_file_name = temp_file.name
+    temp_file.close()
+
+    net.show(temp_file_name)
+    with open(temp_file_name, 'r') as f:
         return f.read()
 
 if __name__ == '__main__':

@@ -302,18 +302,19 @@ import networkx as nx
 
 # Function to fetch and process data
 def fetch_and_process_data(trino_user, trino_password):
+    os.environ['TRINO_USER']= trino_user
+    os.environ['TRINO_PASSWORD']= trino_password
     try:
         conn = connect(
             host="https://trino.diz.uk-erlangen.de",
             port=443,
-            user=trino_user,
-            auth=BasicAuthentication(trino_user, trino_password),
+            user=os.environ['TRINO_USER'],
+            auth=BasicAuthentication(os.environ['TRINO_USER'], os.environ['TRINO_PASSWORD']),
             verify=False,
             http_scheme="https",
             catalog="catalog"
         )
         cur = conn.cursor()
-        print('Data is loading.')
         
         def execute_query_to_df(query):
             cur.execute(query)

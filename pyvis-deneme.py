@@ -527,11 +527,11 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
                     net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
 
     if 'ICD' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['ICD'], 'ICD', 'ICD')
+        add_nodes_edges(net, co_occurrence_matrices['ICD'], 'C', 'ICD')
     if 'LOINC' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['LOINC'], 'LO', 'LOINC')
+        add_nodes_edges(net, co_occurrence_matrices['LOINC'], 'O', 'LOINC')
     if 'OPS' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['OPS'], 'OPS', 'OPS')
+        add_nodes_edges(net, co_occurrence_matrices['OPS'], 'P', 'OPS')
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
     temp_file_name = temp_file.name

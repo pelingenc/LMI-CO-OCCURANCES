@@ -93,7 +93,7 @@ def update_graph(n_clicks, selected_code, num_nodes_to_visualize, show_labels):
         return "", ""
 
     # Initialize a PyVis network
-    net = Network(notebook=True) #, cdn_resources='remote'
+    net = Network(notebook=True)
 
     # Example: Generating a graph
     try:
@@ -141,13 +141,17 @@ def update_graph(n_clicks, selected_code, num_nodes_to_visualize, show_labels):
             add_nodes_edges(data['Observation'], 'Ob', 'Observation')
 
         # Generate HTML for the PyVis network and embed it directly
-        graph_html = net.generate_html(notebook=False)
-
-        # Display the graph in an iframe
+        #graph_html = net.generate_html(notebook=False)
         #graph_html = "<html><body><h1>Test Graph</h1></body></html>"
+        #print(graph_html)  # Add this line to output the HTML content for debugging
+
+        net.show("graph.html")
+        
         graph_layout = html.Div([
-            html.Iframe(srcDoc=graph_html, style={'width': '100%', 'height': '600px'})
+            html.Iframe(srcDoc=open('graph.html', 'r').read(), style={'width': '100%', 'height': '600px'})
         ])
+
+
 
         return graph_layout, "Graph generated successfully!"
 
@@ -160,6 +164,7 @@ def wrap_text(text, max_width=15):
 
 if __name__ == '__main__':
     app.run_server(debug=True, port=8051)
+
 
 
 

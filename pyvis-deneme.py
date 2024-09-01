@@ -34,6 +34,7 @@ import pandas as pd
 import numpy as np
 from pyvis.network import Network
 import base64
+import io
 import textwrap
 
 # Sample data for demonstration purposes
@@ -139,16 +140,12 @@ def update_graph(n_clicks, selected_code, num_nodes_to_visualize, show_labels):
         if 'Observation' in data:
             add_nodes_edges(data['Observation'], 'Ob', 'Observation')
 
-        # Generate HTML content directly
+        # Generate HTML for the PyVis network and embed it directly
         graph_html = net.generate_html(notebook=False)
 
-        # Embed the HTML content directly into an iframe using a data URL
-        graph_base64 = base64.b64encode(graph_html.encode()).decode()
+        # Display the graph in an iframe
         graph_layout = html.Div([
-            html.Iframe(
-                src=f"data:text/html;base64,{graph_base64}",
-                style={'width': '100%', 'height': '600px'}
-            )
+            html.Iframe(srcDoc=graph_html, style={'width': '100%', 'height': '600px'})
         ])
 
         return graph_layout, "Graph generated successfully!"
@@ -162,6 +159,7 @@ def wrap_text(text, max_width=15):
 
 if __name__ == '__main__':
     app.run_server(debug=True, port=8051)
+
 
 
 # In[ ]:

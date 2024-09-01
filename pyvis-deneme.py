@@ -38,6 +38,36 @@ from dash.dependencies import Input, Output
 from pyvis.network import Network
 import tempfile
 import networkx as nx
+import requests
+import zipfile
+
+# URL of the ZIP file you want to download (replace with your own URL)
+dropbox_url = 'https://www.dropbox.com/scl/fo/y0i3bwhd6rnijujmm6uyx/AHJnzBz20d9hsi8XYFBjd64?rlkey=dxm0mky9bdq43xbov9x7ir39u&st=wrsjk7bw&dl=0'
+# Change 'dl=0' to 'dl=1' to directly download the file
+download_url = dropbox_url.replace('dl=0', 'dl=1')
+
+# Local directory and file path
+directory = 'C:/dataset'
+if not os.path.exists(directory):
+    os.makedirs(directory)
+
+zip_file_path = os.path.join(directory, 'downloaded_file.zip')
+
+# Download the ZIP file
+response = requests.get(download_url)
+if response.status_code == 200:
+    with open(zip_file_path, 'wb') as file:
+        file.write(response.content)
+    print(f"File downloaded successfully to {zip_file_path}")
+else:
+    print("Failed to download file:", response.status_code)
+    response.raise_for_status()
+
+# Unzip the file
+with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+    zip_ref.extractall(directory)
+    print(f"Files extracted to {directory}")
+
 
 # Data processing (same as before)
 directory = 'C:/dataset' 

@@ -298,41 +298,20 @@ from pyvis.network import Network
 import tempfile
 
 # Function to fetch and process data
+
 def fetch_and_process_data(file_path):
     try:
-#         # Load CSV data
-#         flat_df = pd.read_csv(file_path)
-        
-#         # Check for required columns
-#         required_columns = ['PatientID', 'Codes', 'ResourceType']
-#         missing_columns = [col for col in required_columns if col not in flat_df.columns]
-#         if missing_columns:
-#             raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
-        
-#         condition_df = flat_df[flat_df['ResourceType'] == 'Condition']
-#         observation_df = flat_df[flat_df['ResourceType'] == 'Observation']
-#         procedure_df = flat_df[flat_df['ResourceType'] == 'Procedure']
-        
-#         # Create co-occurrence matrices
-#         def create_co_occurrence_matrix(df):
-#             if df.empty:
-#                 return pd.DataFrame()
-#             patient_matrix = df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
-#             patient_matrix = patient_matrix.loc[:, (patient_matrix != 0).any(axis=0)]
-#             co_occurrence_matrix = patient_matrix.T.dot(patient_matrix)
-#             np.fill_diagonal(co_occurrence_matrix.values, 0)
-#             return co_occurrence_matrix
-        
-#         co_occurrence_matrices = {
-#             'Main': create_co_occurrence_matrix(flat_df),
-#             'Condition': create_co_occurrence_matrix(condition_df),
-#             'Observation': create_co_occurrence_matrix(observation_df),
-#             'Procedure': create_co_occurrence_matrix(procedure_df)
-#         }
-        Co_occurrence_matrices = {}
-        with pd.HDFStore('C:/dataset/co_occurrence_matrices.h5') as store:
-            for key in store.keys():
-                Co_occurrence_matrices[key[1:]] = store[key]
+        # Check if the file is an HDF5 file
+        if file_path.endswith('.h5'):
+            co_occurrence_matrices = {}
+            with pd.HDFStore(file_path) as store:
+                for key in store.keys():
+                    co_occurrence_matrices[key[1:]] = store[key]
+            return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'ICD': pd.DataFrame(), 'LOINC': pd.DataFrame(), 'OPS': pd.DataFrame()}}
 
         
         return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}

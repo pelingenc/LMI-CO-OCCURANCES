@@ -290,52 +290,13 @@
 
 import os
 import pandas as pd
-import numpy as np
 import dash
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
 from pyvis.network import Network
 import tempfile
-import pyarrow
-
-
-# Function to fetch and process data
-def fetch_and_process_data(file_path):
-    try:
-        # Load CSV data
-        flat_df = pd.read_parquet('C:/dataset/FHIR_data.parquet')
-        
-        # Check for required columns
-        required_columns = ['PatientID', 'Codes', 'ResourceType']
-        missing_columns = [col for col in required_columns if col not in flat_df.columns]
-        if missing_columns:
-            raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
-        
-        condition_df = flat_df[flat_df['ResourceType'] == 'Condition']
-        observation_df = flat_df[flat_df['ResourceType'] == 'Observation']
-        procedure_df = flat_df[flat_df['ResourceType'] == 'Procedure']
-        
-        # Create co-occurrence matrices
-        def create_co_occurrence_matrix(df):
-            if df.empty:
-                return pd.DataFrame()
-            patient_matrix = df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
-            patient_matrix = patient_matrix.loc[:, (patient_matrix != 0).any(axis=0)]
-            co_occurrence_matrix = patient_matrix.T.dot(patient_matrix)
-            np.fill_diagonal(co_occurrence_matrix.values, 0)
-            return co_occurrence_matrix
-        
-        co_occurrence_matrices = {
-            'Main': create_co_occurrence_matrix(flat_df),
-            'Condition': create_co_occurrence_matrix(condition_df),
-            'Observation': create_co_occurrence_matrix(observation_df),
-            'Procedure': create_co_occurrence_matrix(procedure_df)
-        }
-
-        return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
-    
-    except Exception as e:
-        return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'Condition': pd.DataFrame(), 'Observation': pd.DataFrame(), 'Procedure': pd.DataFrame()}}
+import base64
+import io
 
 # Dash application setup
 app = dash.Dash(__name__)
@@ -343,12 +304,12 @@ server = app.server
 
 app.layout = html.Div([
     html.H1("Co-Occurrences in FHIR Codes"),
-    html.Div([
-        html.Label("Enter the directory of the CSV file:"),
-        dcc.Input(id='csv-file-path', type='text', placeholder='Path to CSV file'),
-        html.Button('Load Data', id='load-button'),
-        html.Div(id='load-feedback', children='', style={'color': 'red'}),
-    ]),
+    dcc.Upload(
+        id='upload-data',
+        children=html.Button('Upload Data'),
+        multiple=False
+    ),
+    html.Div(id='upload-feedback', children='', style={'color': 'red'}),
     html.Div([
         html.Label("Select the number of nodes to visualize:"),
         dcc.Slider(
@@ -387,42 +348,78 @@ app.layout = html.Div([
     dcc.Store(id='data-store')  # Hidden store to keep data
 ])
 
+def fetch_and_process_data(file_content):
+    try:
+        # Read CSV data from uploaded content
+        flat_df = pd.read_parquet(io.BytesIO(file_content))
+        
+        # Check for required columns
+        required_columns = ['PatientID', 'Codes', 'ResourceType']
+        missing_columns = [col for col in required_columns if col not in flat_df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+        
+        condition_df = flat_df[flat_df['ResourceType'] == 'Condition']
+        observation_df = flat_df[flat_df['ResourceType'] == 'Observation']
+        procedure_df = flat_df[flat_df['ResourceType'] == 'Procedure']
+        
+        # Create co-occurrence matrices
+        def create_co_occurrence_matrix(df):
+            if df.empty:
+                return pd.DataFrame()
+            patient_matrix = df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
+            patient_matrix = patient_matrix.loc[:, (patient_matrix != 0).any(axis=0)]
+            co_occurrence_matrix = patient_matrix.T.dot(patient_matrix)
+            np.fill_diagonal(co_occurrence_matrix.values, 0)
+            return co_occurrence_matrix
+        
+        co_occurrence_matrices = {
+            'Main': create_co_occurrence_matrix(flat_df),
+            'Condition': create_co_occurrence_matrix(condition_df),
+            'Observation': create_co_occurrence_matrix(observation_df),
+            'Procedure': create_co_occurrence_matrix(procedure_df)
+        }
+
+        return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
+    
+    except Exception as e:
+        return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'Condition': pd.DataFrame(), 'Observation': pd.DataFrame(), 'Procedure': pd.DataFrame()}}
+
 @app.callback(
-    Output('load-feedback', 'children'),
+    Output('upload-feedback', 'children'),
     Output('data-container', 'style'),
     Output('code-dropdown', 'options'),
     Output('data-store', 'data'),
-    Input('load-button', 'n_clicks'),
-    State('csv-file-path', 'value')
+    Input('upload-data', 'contents')
 )
-def load_data(n_clicks, file_path):
+def upload_file(file_content):
     feedback_message = ""
     data_style = {'display': 'none'}
     options = []
     data = {}
 
-    if n_clicks is not None and n_clicks > 0:
-        if file_path:
-            result = fetch_and_process_data(file_path)
-            if result['success']:
-                co_occurrence_matrices = result['data']
-                
-                # Get the columns for the dropdown options
-                options = [{'label': code, 'value': code} for code in co_occurrence_matrices.get('Main', pd.DataFrame()).columns]
-                
-                # Convert DataFrames to JSON-serializable dictionaries
-                data = {
-                    'co_occurrence_matrices': {
-                        key: matrix.to_dict() for key, matrix in co_occurrence_matrices.items()
-                    }
+    if file_content:
+        # Decode and process uploaded file
+        content_type, content_string = file_content.split(',')
+        decoded = base64.b64decode(content_string)
+        result = fetch_and_process_data(decoded)
+        if result['success']:
+            co_occurrence_matrices = result['data']
+            
+            # Get the columns for the dropdown options
+            options = [{'label': code, 'value': code} for code in co_occurrence_matrices.get('Main', pd.DataFrame()).columns]
+            
+            # Convert DataFrames to JSON-serializable dictionaries
+            data = {
+                'co_occurrence_matrices': {
+                    key: matrix.to_dict() for key, matrix in co_occurrence_matrices.items()
                 }
-                
-                feedback_message = result['message']
-                data_style = {'display': 'block'}
-            else:
-                feedback_message = result['message']
+            }
+            
+            feedback_message = result['message']
+            data_style = {'display': 'block'}
         else:
-            feedback_message = "Please provide the file path."
+            feedback_message = result['message']
 
     return feedback_message, data_style, options, data
 
@@ -439,7 +436,8 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
         return ""
 
     net = Network(notebook=True, cdn_resources='remote')
-    main_df = co_occurrence_matrices['Main']
+    co_occurrence_matrices = data.get('co_occurrence_matrices', {})
+    main_df = pd.DataFrame(co_occurrence_matrices.get('Main', {}))
 
     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
     top_neighbors = list(neighbors_sorted.index[:15])
@@ -470,11 +468,11 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
                     net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
 
     if 'Condition' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['Condition'], 'Co', 'Condition')
+        add_nodes_edges(net, pd.DataFrame(co_occurrence_matrices['Condition']), 'Co', 'Condition')
     if 'Observation' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['Observation'], 'Ob', 'Observation')
+        add_nodes_edges(net, pd.DataFrame(co_occurrence_matrices['Observation']), 'Ob', 'Observation')
     if 'Procedure' in co_occurrence_matrices:
-        add_nodes_edges(net, co_occurrence_matrices['Procedure'], 'Pr', 'Procedure')
+        add_nodes_edges(net, pd.DataFrame(co_occurrence_matrices['Procedure']), 'Pr', 'Procedure')
 
     temp_file = tempfile.NamedTemporaryFile(delete=True, suffix='.html')
     temp_file_name = temp_file.name

@@ -296,6 +296,7 @@ from dash import html, dcc
 from dash.dependencies import Input, Output, State
 from pyvis.network import Network
 import tempfile
+import pyarrow
 
 
 # Function to fetch and process data

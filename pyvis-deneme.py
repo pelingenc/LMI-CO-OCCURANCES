@@ -288,37 +288,115 @@
 
 ################################################################### DELL-READ-FLAT_DF ##############################################################
 
+import os
+import pandas as pd
+import numpy as np
 import dash
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
-import pandas as pd
-import tempfile
 from pyvis.network import Network
+import tempfile
 
+# Function to fetch and process data
+def fetch_and_process_data(file_path):
+    try:
+#         # Load CSV data
+#         flat_df = pd.read_csv(file_path)
+        
+#         # Check for required columns
+#         required_columns = ['PatientID', 'Codes', 'ResourceType']
+#         missing_columns = [col for col in required_columns if col not in flat_df.columns]
+#         if missing_columns:
+#             raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+        
+#         condition_df = flat_df[flat_df['ResourceType'] == 'Condition']
+#         observation_df = flat_df[flat_df['ResourceType'] == 'Observation']
+#         procedure_df = flat_df[flat_df['ResourceType'] == 'Procedure']
+        
+#         # Create co-occurrence matrices
+#         def create_co_occurrence_matrix(df):
+#             if df.empty:
+#                 return pd.DataFrame()
+#             patient_matrix = df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
+#             patient_matrix = patient_matrix.loc[:, (patient_matrix != 0).any(axis=0)]
+#             co_occurrence_matrix = patient_matrix.T.dot(patient_matrix)
+#             np.fill_diagonal(co_occurrence_matrix.values, 0)
+#             return co_occurrence_matrix
+        
+#         co_occurrence_matrices = {
+#             'Main': create_co_occurrence_matrix(flat_df),
+#             'Condition': create_co_occurrence_matrix(condition_df),
+#             'Observation': create_co_occurrence_matrix(observation_df),
+#             'Procedure': create_co_occurrence_matrix(procedure_df)
+#         }
+        Co_occurrence_matrices = {}
+        with pd.HDFStore('C:/dataset/co_occurrence_matrices.h5') as store:
+            for key in store.keys():
+                Co_occurrence_matrices[key[1:]] = store[key]
+
+        
+        return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
+    
+    except Exception as e:
+        return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'Condition': pd.DataFrame(), 'Observation': pd.DataFrame(), 'Procedure': pd.DataFrame()}}
+
+# Dash application setup
 app = dash.Dash(__name__)
 server = app.server
+
 app.layout = html.Div([
     html.H1("Co-Occurrences in FHIR Codes"),
-    dcc.Input(id='csv-file-path', type='text', placeholder='Path to CSV file'),
-    html.Button('Load Data', id='load-button'),
-    html.Div(id='load-feedback', style={'color': 'red'}),
-    dcc.Slider(id='num-nodes-slider', min=1, max=10, step=1, value=5,
-               marks={i: str(i) for i in range(1, 11)},
-               tooltip={"placement": "bottom", "always_visible": True}),
-    dcc.Dropdown(id='code-dropdown', options=[], placeholder="Select a code"),
-    dcc.Checklist(id='show-labels', options=[{'label': 'Show Labels', 'value': 'show'}], value=[]),
-    dcc.Loading(id="loading", type="circle", children=[html.Div(id='data-container', style={'display': 'none'})]),
+    html.Div([
+        html.Label("Enter the directory of the CSV file:"),
+        dcc.Input(id='csv-file-path', type='text', placeholder='Path to CSV file'),
+        html.Button('Load Data', id='load-button'),
+        html.Div(id='load-feedback', children='', style={'color': 'red'}),
+    ]),
+    html.Div([
+        html.Label("Select the number of nodes to visualize:"),
+        dcc.Slider(
+            id='num-nodes-slider',
+            min=1,
+            max=10,
+            step=1,
+            value=5,
+            marks={i: str(i) for i in range(1, 11)},
+            tooltip={"placement": "bottom", "always_visible": True}
+        )
+    ]),
+    html.Div([
+        html.Label("Select a code:"),
+        dcc.Dropdown(
+            id='code-dropdown',
+            options=[],  # Options will be populated after loading data
+            placeholder="Select a code",
+            clearable=False
+        )
+    ]),
+    dcc.Checklist(
+        id='show-labels',
+        options=[{'label': 'Show Labels', 'value': 'show'}],
+        value=[]  # Start with an empty list so labels are not shown by default
+    ),
+    dcc.Loading(
+        id="loading",
+        type="circle",
+        children=[
+            html.Div(id='data-container', style={'display': 'none'}),
+            html.Div(id='data-loading-message', children='Data is still loading...')
+        ]
+    ),
     html.Iframe(id='graph-iframe', style={'width': '100%', 'height': '600px'}),
-    dcc.Store(id='data-store')
+    dcc.Store(id='data-store')  # Hidden store to keep data
 ])
 
 @app.callback(
-    [Output('load-feedback', 'children'),
-     Output('data-container', 'style'),
-     Output('code-dropdown', 'options'),
-     Output('data-store', 'data')],
-    [Input('load-button', 'n_clicks')],
-    [State('csv-file-path', 'value')]
+    Output('load-feedback', 'children'),
+    Output('data-container', 'style'),
+    Output('code-dropdown', 'options'),
+    Output('data-store', 'data'),
+    Input('load-button', 'n_clicks'),
+    State('csv-file-path', 'value')
 )
 def load_data(n_clicks, file_path):
     feedback_message = ""
@@ -332,7 +410,7 @@ def load_data(n_clicks, file_path):
             if result['success']:
                 co_occurrence_matrices = result['data']
                 options = [{'label': code, 'value': code} for code in co_occurrence_matrices['Main'].columns]
-
+                
                 # Convert DataFrames to dictionaries for JSON serialization
                 data = {
                     'co_occurrence_matrices': {
@@ -349,13 +427,65 @@ def load_data(n_clicks, file_path):
 
     return feedback_message, data_style, options, data
 
+
 @app.callback(
     Output('graph-iframe', 'srcDoc'),
-    [Input('code-dropdown', 'value'),
-     Input('num-nodes-slider', 'value'),
-     Input('show-labels', 'value')],
-    [State('data-store', 'data')]
+    Input('code-dropdown', 'value'),
+    Input('num-nodes-slider', 'value'),
+    Input('show-labels', 'value'),
+    State('data-store', 'data')
 )
+# def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
+#     if not selected_code or not data or 'co_occurrence_matrices' not in data:
+#         return ""
+
+#     co_occurrence_matrices = data.get('co_occurrence_matrices', {})
+#     if not co_occurrence_matrices:
+#         return ""
+
+#     main_df = co_occurrence_matrices.get('Main', pd.DataFrame())
+#     if main_df.empty:
+#         return ""
+
+#     net = Network(notebook=True)
+#     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
+#     top_neighbors = list(neighbors_sorted.index[:15])
+
+#     def add_nodes_edges(graph, child_df, prefix, group_name):
+#         top_neighbor = None
+#         for neighbor_code in neighbors_sorted.index:
+#             if neighbor_code.startswith(prefix):
+#                 top_neighbor = neighbor_code
+#                 break
+
+#         if top_neighbor:
+#             net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color='gray')
+#             net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color='gray')
+#             net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
+
+#             top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
+#             top_neighbors = list(top_neighbor_row.index[:num_nodes_to_visualize])
+
+#             for neighbor in top_neighbors:
+#                 if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
+#                     net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color='gray')
+#                     net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
+
+#     if 'Condition' in co_occurrence_matrices:
+#         add_nodes_edges(net, co_occurrence_matrices['Condition'], 'Co', 'Condition')
+#     if 'Observation' in co_occurrence_matrices:
+#         add_nodes_edges(net, co_occurrence_matrices['Observation'], 'Ob', 'Observation')
+#     if 'Procedure' in co_occurrence_matrices:
+#         add_nodes_edges(net, co_occurrence_matrices['Procedure'], 'Pr', 'Procedure')
+
+#     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
+#     temp_file_name = temp_file.name
+#     temp_file.close()
+
+#     net.show(temp_file_name)
+#     with open(temp_file_name, 'r') as f:
+#         return f.read()
+
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     if not selected_code or not data or 'co_occurrence_matrices' not in data:
         return ""
@@ -407,8 +537,10 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     with open(temp_file_name, 'r') as f:
         return f.read()
 
+
 if __name__ == '__main__':
     app.run_server(debug=True, port=8052)
+
 
 # In[ ]:
 

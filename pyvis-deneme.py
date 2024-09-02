@@ -297,23 +297,43 @@ from dash.dependencies import Input, Output, State
 from pyvis.network import Network
 import tempfile
 
-# Function to fetch and process data
+from notebook import notebookapp as app
+app.iopub_data_rate_limit = 10000000  # Increase the limit
 
+
+# Function to fetch and process data
 def fetch_and_process_data(file_path):
     try:
-        # Check if the file is an HDF5 file
-        if file_path.endswith('.h5'):
-            co_occurrence_matrices = {}
-            with pd.HDFStore(file_path) as store:
-                for key in store.keys():
-                    co_occurrence_matrices[key[1:]] = store[key]
-            return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return {'success': False, 'message': f"Error: {e}", 'data': {'Main': pd.DataFrame(), 'ICD': pd.DataFrame(), 'LOINC': pd.DataFrame(), 'OPS': pd.DataFrame()}}
-
+        # Load CSV data
+        flat_df = pd.read_parquet('C:/dataset/FHIR_data.parquet')
         
+        # Check for required columns
+        required_columns = ['PatientID', 'Codes', 'ResourceType']
+        missing_columns = [col for col in required_columns if col not in flat_df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+        
+        condition_df = flat_df[flat_df['ResourceType'] == 'Condition']
+        observation_df = flat_df[flat_df['ResourceType'] == 'Observation']
+        procedure_df = flat_df[flat_df['ResourceType'] == 'Procedure']
+        
+        # Create co-occurrence matrices
+        def create_co_occurrence_matrix(df):
+            if df.empty:
+                return pd.DataFrame()
+            patient_matrix = df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
+            patient_matrix = patient_matrix.loc[:, (patient_matrix != 0).any(axis=0)]
+            co_occurrence_matrix = patient_matrix.T.dot(patient_matrix)
+            np.fill_diagonal(co_occurrence_matrix.values, 0)
+            return co_occurrence_matrix
+        
+        co_occurrence_matrices = {
+            'Main': create_co_occurrence_matrix(flat_df),
+            'Condition': create_co_occurrence_matrix(condition_df),
+            'Observation': create_co_occurrence_matrix(observation_df),
+            'Procedure': create_co_occurrence_matrix(procedure_df)
+        }
+
         return {'success': True, 'message': 'Data is loaded.', 'data': co_occurrence_matrices}
     
     except Exception as e:
@@ -388,9 +408,11 @@ def load_data(n_clicks, file_path):
             result = fetch_and_process_data(file_path)
             if result['success']:
                 co_occurrence_matrices = result['data']
-                options = [{'label': code, 'value': code} for code in co_occurrence_matrices['Main'].columns]
                 
-                # Convert DataFrames to dictionaries for JSON serialization
+                # Get the columns for the dropdown options
+                options = [{'label': code, 'value': code} for code in co_occurrence_matrices.get('Main', pd.DataFrame()).columns]
+                
+                # Convert DataFrames to JSON-serializable dictionaries
                 data = {
                     'co_occurrence_matrices': {
                         key: matrix.to_dict() for key, matrix in co_occurrence_matrices.items()
@@ -406,7 +428,6 @@ def load_data(n_clicks, file_path):
 
     return feedback_message, data_style, options, data
 
-
 @app.callback(
     Output('graph-iframe', 'srcDoc'),
     Input('code-dropdown', 'value'),
@@ -414,70 +435,14 @@ def load_data(n_clicks, file_path):
     Input('show-labels', 'value'),
     State('data-store', 'data')
 )
-# def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
-#     if not selected_code or not data or 'co_occurrence_matrices' not in data:
-#         return ""
-
-#     co_occurrence_matrices = data.get('co_occurrence_matrices', {})
-#     if not co_occurrence_matrices:
-#         return ""
-
-#     main_df = co_occurrence_matrices.get('Main', pd.DataFrame())
-#     if main_df.empty:
-#         return ""
-
-#     net = Network(notebook=True)
-#     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
-#     top_neighbors = list(neighbors_sorted.index[:15])
-
-#     def add_nodes_edges(graph, child_df, prefix, group_name):
-#         top_neighbor = None
-#         for neighbor_code in neighbors_sorted.index:
-#             if neighbor_code.startswith(prefix):
-#                 top_neighbor = neighbor_code
-#                 break
-
-#         if top_neighbor:
-#             net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color='gray')
-#             net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color='gray')
-#             net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
-
-#             top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
-#             top_neighbors = list(top_neighbor_row.index[:num_nodes_to_visualize])
-
-#             for neighbor in top_neighbors:
-#                 if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
-#                     net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color='gray')
-#                     net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
-
-#     if 'Condition' in co_occurrence_matrices:
-#         add_nodes_edges(net, co_occurrence_matrices['Condition'], 'Co', 'Condition')
-#     if 'Observation' in co_occurrence_matrices:
-#         add_nodes_edges(net, co_occurrence_matrices['Observation'], 'Ob', 'Observation')
-#     if 'Procedure' in co_occurrence_matrices:
-#         add_nodes_edges(net, co_occurrence_matrices['Procedure'], 'Pr', 'Procedure')
-
-#     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
-#     temp_file_name = temp_file.name
-#     temp_file.close()
-
-#     net.show(temp_file_name)
-#     with open(temp_file_name, 'r') as f:
-#         return f.read()
 
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
-    if not selected_code or not data or 'co_occurrence_matrices' not in data:
+    if not selected_code:
         return ""
 
-    co_occurrence_matrices = data.get('co_occurrence_matrices', {})
-    if not co_occurrence_matrices:
-        return ""
+    net = Network(notebook=True, cdn_resources='remote')
+    main_df = co_occurrence_matrices['Main']
 
-    main_df = co_occurrence_matrices.get('Main', pd.DataFrame())
-    if main_df.empty:
-        return ""
-
-    net = Network(notebook=True)
     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
     top_neighbors = list(neighbors_sorted.index[:15])
 
@@ -489,8 +454,12 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
                 break
 
         if top_neighbor:
-            net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color='gray')
-            net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color='gray')
+            selected_code_label = selected_code
+            top_neighbor_label = top_neighbor
+
+            net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+            net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+
             net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
 
             top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
@@ -498,7 +467,8 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
 
             for neighbor in top_neighbors:
                 if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
-                    net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color='gray')
+                    neighbor_label = neighbor
+                    net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
                     net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
 
     if 'Condition' in co_occurrence_matrices:
@@ -508,14 +478,12 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     if 'Procedure' in co_occurrence_matrices:
         add_nodes_edges(net, co_occurrence_matrices['Procedure'], 'Pr', 'Procedure')
 
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
+    temp_file = tempfile.NamedTemporaryFile(delete=True, suffix='.html')
     temp_file_name = temp_file.name
     temp_file.close()
 
     net.show(temp_file_name)
-    with open(temp_file_name, 'r') as f:
-        return f.read()
-
+    return open(temp_file_name, 'r').read()
 
 if __name__ == '__main__':
     app.run_server(debug=True, port=8052)

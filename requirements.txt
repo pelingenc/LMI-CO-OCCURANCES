@@ -5,6 +5,7 @@ dash-table==5.0.0
 pandas
 numpy
 pywebview
+pyarrow
 textwrap3
 networkx
 trino

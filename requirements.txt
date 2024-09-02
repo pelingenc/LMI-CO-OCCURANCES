@@ -3,7 +3,7 @@ dash-core-components==2.0.0
 dash-html-components==2.0.0
 dash-table==5.0.0
 pandas
-numpy
+numpy==1.25.0
 pywebview
 pyarrow==12.0.1
 fastparquet==2023.10.0

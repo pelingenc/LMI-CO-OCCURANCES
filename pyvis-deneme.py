@@ -297,9 +297,6 @@ from dash.dependencies import Input, Output, State
 from pyvis.network import Network
 import tempfile
 
-from notebook import notebookapp as app
-app.iopub_data_rate_limit = 10000000  # Increase the limit
-
 
 # Function to fetch and process data
 def fetch_and_process_data(file_path):

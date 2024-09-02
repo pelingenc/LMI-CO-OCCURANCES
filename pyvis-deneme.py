@@ -297,6 +297,13 @@ from pyvis.network import Network
 import tempfile
 import base64
 import io
+import numpy as np
+
+SUBGROUP_COLORS = {
+    'Condition': "#00bfff",
+    'Observation': "#ffc0cb",
+    'Procedure': "#9a31a8"
+}
 
 # Dash application setup
 app = dash.Dash(__name__)
@@ -431,6 +438,17 @@ def upload_file(file_content):
     State('data-store', 'data')
 )
 
+# Define colors for each subgroup
+# SUBGROUP_COLORS = {
+#     'ICD': "#00bfff",
+#     'LOINC': "#ffc0cb",
+#     'OPS': "#9a31a8"
+# }
+
+# Define colors for each subgroup (same as before)
+
+
+
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     if not selected_code:
         return ""
@@ -483,7 +501,6 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
 
 if __name__ == '__main__':
     app.run_server(debug=True, port=8052)
-
 
 # In[ ]:
 

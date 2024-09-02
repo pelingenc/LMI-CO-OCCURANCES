@@ -296,7 +296,7 @@ import tempfile
 from pyvis.network import Network
 
 app = dash.Dash(__name__)
-
+server = app.server
 app.layout = html.Div([
     html.H1("Co-Occurrences in FHIR Codes"),
     dcc.Input(id='csv-file-path', type='text', placeholder='Path to CSV file'),

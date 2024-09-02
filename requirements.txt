@@ -4,6 +4,7 @@ dash-html-components==2.0.0
 dash-table==5.0.0
 pandas
 numpy
+pytables
 pywebview
 textwrap3
 networkx

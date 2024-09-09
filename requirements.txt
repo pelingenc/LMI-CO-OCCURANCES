@@ -5,6 +5,7 @@ dash-renderer
 dash-table
 pandas
 numpy
+scipy
 pywebview
 pyarrow
 fastparquet

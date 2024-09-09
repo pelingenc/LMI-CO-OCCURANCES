@@ -1,17 +1,19 @@
-dash
-dash-core-components
-dash-html-components
-dash-table
-pandas
-numpy
-pywebview
-pyarrow
-fastparquet
-textwrap3
-networkx
-trino
-pyvis
-werkzeug
-gunicorn
+dash==2.13.1
+dash-core-components==2.0.0
+dash-html-components==2.0.0
+dash-renderer==1.9.1
+dash-table==5.0.0
+pandas==1.5.3
+numpy==1.23.5
+pywebview==3.5
+pyarrow==11.0.0
+fastparquet==2023.7.0
+textwrap3==0.9.2
+networkx==3.1
+trino==0.318.0
+pyvis==0.3.2
+werkzeug==2.3.6
+gunicorn==21.2.0
+
 
 

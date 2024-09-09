@@ -298,6 +298,14 @@ import tempfile
 import base64
 import io
 import numpy as np
+import plotly.figure_factory as ff
+import scipy.cluster.hierarchy as sch
+from sklearn.cluster import AgglomerativeClustering
+from dash import dcc, html, Input, Output, State
+import plotly.graph_objs as go
+from scipy.cluster.hierarchy import dendrogram, linkage
+import matplotlib.pyplot as plt
+
 
 SUBGROUP_COLORS = {
     'Condition': "#00bfff",
@@ -308,6 +316,54 @@ SUBGROUP_COLORS = {
 # Dash application setup
 app = dash.Dash(__name__)
 server = app.server
+
+# app.layout = html.Div([
+#     html.H1("Co-Occurrences in FHIR Codes"),
+#     dcc.Upload(
+#         id='upload-data',
+#         children=html.Button('Upload Data'),
+#         multiple=False
+#     ),
+#     html.Div(id='upload-feedback', children='', style={'color': 'red'}),
+#     html.Div([
+#         html.Label("Select the number of nodes to visualize:"),
+#         dcc.Slider(
+#             id='num-nodes-slider',
+#             min=0,
+#             max=10,
+#             step=1,
+#             value=1,
+#             marks={i: str(i) for i in range(1, 11)},
+#             tooltip={"placement": "bottom", "always_visible": True}
+#         )
+#     ]),
+#     html.Div([
+#         html.Label("Select a code:"),
+#         dcc.Dropdown(
+#             id='code-dropdown',
+#             options=[],  # Options will be populated after loading data
+#             placeholder="Select a code",
+#             clearable=False
+#         )
+#     ]),
+#     dcc.Checklist(
+#         id='show-labels',
+#         options=[{'label': 'Show Labels', 'value': 'show'}],
+#         value=[]  # Start with an empty list so labels are not shown by default
+#     ),
+#     dcc.Loading(
+#         id="loading",
+#         type="circle",
+#         children=[
+#             html.Div(id='data-container', style={'display': 'none'}),
+#             html.Div(id='data-loading-message', children='Data is still loading...')
+#         ]
+#     ),
+#     html.Iframe(id='graph-iframe', style={'width': '100%', 'height': '600px'}),
+#     dcc.Graph(id='bar-chart', style={'height': '600px'}),  # Set height for the bar chart
+#     dcc.Graph(id='dendrogram', style={'height': '1000px'}),  # Set height for the dendrogram
+#     dcc.Store(id='data-store')  # Hidden store to keep data
+# ])
 
 app.layout = html.Div([
     html.H1("Co-Occurrences in FHIR Codes"),
@@ -321,10 +377,10 @@ app.layout = html.Div([
         html.Label("Select the number of nodes to visualize:"),
         dcc.Slider(
             id='num-nodes-slider',
-            min=1,
+            min=0,
             max=10,
             step=1,
-            value=5,
+            value=1,
             marks={i: str(i) for i in range(1, 11)},
             tooltip={"placement": "bottom", "always_visible": True}
         )
@@ -343,25 +399,44 @@ app.layout = html.Div([
         options=[{'label': 'Show Labels', 'value': 'show'}],
         value=[]  # Start with an empty list so labels are not shown by default
     ),
+    
     dcc.Loading(
         id="loading",
         type="circle",
         children=[
-            html.Div(id='data-container', style={'display': 'none'}),
+            html.Div(id='data-container', style={'display': 'none'}),  # Hidden div for callbacks
             html.Div(id='data-loading-message', children='Data is still loading...')
         ]
     ),
-    html.Iframe(id='graph-iframe', style={'width': '100%', 'height': '600px'}),
+
+    # Graphs positioned side-by-side using CSS flexbox
+    html.Div([
+        # Left column - PyVis graph
+        html.Div([
+            html.Iframe(id='graph-iframe', style={'width': '100%', 'height': '600px'}),
+        ], style={'flex': '1', 'padding': '10px'}),  # PyVis on the left side, takes 50% of space
+
+        # Right column - Bar chart and dendrogram stacked
+        html.Div([
+            dcc.Graph(id='dendrogram', style={'height': '300px'}),  # Dendrogram below bar chart
+            dcc.Graph(id='bar-chart', style={'height': '300px'})  # Bar chart on top , 'margin-bottom': '20px'
+        ], style={'flex': '1', 'padding': '10px'}),  # Bar chart and dendrogram on the right side, takes 50% of space
+
+    ], style={'display': 'flex', 'flex-direction': 'row'}),  # Use flexbox to position the graphs side by side
+    
     dcc.Store(id='data-store')  # Hidden store to keep data
 ])
+
+
 
 def fetch_and_process_data(file_content):
     try:
         # Read CSV data from uploaded content
         flat_df = pd.read_parquet(io.BytesIO(file_content))
+        print('flat_df', flat_df)
         
         # Check for required columns
-        required_columns = ['PatientID', 'Codes', 'ResourceType']
+        required_columns = ['PatientID', 'Codes', 'Displays', 'ResourceType']
         missing_columns = [col for col in required_columns if col not in flat_df.columns]
         if missing_columns:
             raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
@@ -414,7 +489,7 @@ def upload_file(file_content):
             co_occurrence_matrices = result['data']
             
             # Get the columns for the dropdown options
-            options = [{'label': code, 'value': code} for code in co_occurrence_matrices.get('Main', pd.DataFrame()).columns]
+            options = [{'label': code[2:], 'value': code} for code in co_occurrence_matrices.get('Main', pd.DataFrame()).columns]
             
             # Convert DataFrames to JSON-serializable dictionaries
             data = {
@@ -445,9 +520,6 @@ def upload_file(file_content):
 #     'OPS': "#9a31a8"
 # }
 
-# Define colors for each subgroup (same as before)
-
-
 
 def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     if not selected_code:
@@ -456,9 +528,19 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     net = Network(notebook=True, cdn_resources='remote')
     co_occurrence_matrices = data.get('co_occurrence_matrices', {})
     main_df = pd.DataFrame(co_occurrence_matrices.get('Main', {}))
+    print('main_df', main_df)
 
+    # Step 1: Get neighbors of the selected code and sort them
     neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
     top_neighbors = list(neighbors_sorted.index[:15])
+
+    # Print selected code and its top neighbors
+    print(f"\nSelected code: {selected_code}")
+    print(f"Top neighbors of {selected_code}: {top_neighbors}")
+
+    code_patient_group = flat_df.groupby('Codes')['PatientID'].nunique()
+    selected_code_occurrence = code_patient_group.get(selected_code, 0)  # Get occurrence count or 0 if code not found
+    print(f"Occurrence count for {selected_code}: {selected_code_occurrence}")
 
     def add_nodes_edges(graph, child_df, prefix, group_name):
         top_neighbor = None
@@ -468,23 +550,72 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
                 break
 
         if top_neighbor:
-            selected_code_label = selected_code
-            top_neighbor_label = top_neighbor
+            if 'show' in show_labels:
+                selected_code_label = flat_df.loc[flat_df['Codes'] == selected_code, 'Displays'].iloc[0]
+                top_neighbor_label = flat_df.loc[flat_df['Codes'] == top_neighbor, 'Displays'].iloc[0]
+            else:
+                selected_code_label = selected_code[2:]
+                top_neighbor_label = top_neighbor[2:]
 
-            net.add_node(selected_code, title=selected_code, label=selected_code if 'show' in show_labels else selected_code[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
-            net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor if 'show' in show_labels else top_neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
+            group_name1 = 'Condition' if selected_code in co_occurrence_matrices.get('Condition', {}) else \
+                          'Observation' if selected_code in co_occurrence_matrices.get('Observation', {}) else \
+                          'Procedure' if selected_code in co_occurrence_matrices.get('Procedure', {}) else 'Unknown'
 
-            net.add_edge(selected_code, top_neighbor, value=int(main_df.loc[selected_code, top_neighbor]))
+            # Add selected code node if not already present
+            if selected_code not in net.get_nodes():
+                net.add_node(selected_code, title=selected_code, label=selected_code_label, color=SUBGROUP_COLORS.get(group_name1, 'gray'))
+
+            # Add top neighbor node if not already present
+            if top_neighbor not in net.get_nodes():
+                net.add_node(top_neighbor, title=top_neighbor, label=top_neighbor_label, color=SUBGROUP_COLORS.get(group_name, 'gray'))
+
+            # Add edge if both nodes exist
+            if selected_code in net.get_nodes() and top_neighbor in net.get_nodes():
+                edge_value = int(main_df.loc[selected_code, top_neighbor])
+                net.add_edge(selected_code, top_neighbor, value=edge_value, color=SUBGROUP_COLORS.get(group_name, 'gray'))
 
             top_neighbor_row = child_df.loc[top_neighbor].sort_values(ascending=False)
-            top_neighbors = list(top_neighbor_row.index[:num_nodes_to_visualize])
+            top_neighbors_list = list(top_neighbor_row.index[:num_nodes_to_visualize])
 
-            for neighbor in top_neighbors:
+            top_neighbor_occurrence = code_patient_group.get(top_neighbor, 0)  # Get occurrence count or 0 if code not found
+            print(f"\nTop neighbor: {top_neighbor} (Occurrence: {top_neighbor_occurrence})")
+            print(f"Edge between {selected_code} and {top_neighbor}: {int(main_df.loc[selected_code, top_neighbor])} occurrences")
+
+            # Add nodes and edges for top neighbor's neighbors
+            for neighbor in top_neighbors_list:
                 if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
-                    neighbor_label = neighbor
-                    net.add_node(neighbor, title=neighbor, label=neighbor if 'show' in show_labels else neighbor[2:], color=SUBGROUP_COLORS.get(group_name, 'gray'))
-                    net.add_edge(top_neighbor, neighbor, value=int(child_df.loc[top_neighbor, neighbor]))
+                    neighbor_label = flat_df.loc[flat_df['Codes'] == neighbor, 'Displays'].iloc[0] if 'show' in show_labels else neighbor[2:]
+                    
+                    # Add neighbor node if not already present
+                    if neighbor not in net.get_nodes():
+                        net.add_node(neighbor, title=neighbor, label=neighbor_label, color=SUBGROUP_COLORS.get(group_name, 'gray'))
 
+                    # Add edge if both nodes exist
+                    if top_neighbor in net.get_nodes() and neighbor in net.get_nodes():
+                        edge_value = int(child_df.loc[top_neighbor, neighbor])
+                        net.add_edge(top_neighbor, neighbor, value=edge_value)
+
+            # Add edges between the neighbors
+            for i in range(len(top_neighbors_list)):
+                for j in range(i + 1, len(top_neighbors_list)):
+                    neighbor1 = top_neighbors_list[i]
+                    neighbor2 = top_neighbors_list[j]
+                    
+                    # Check if there's a co-occurrence between the two neighbors
+                    if neighbor1 in child_df.index and neighbor2 in child_df.columns:
+                        count = child_df.loc[neighbor1, neighbor2]
+                        if count > 0:
+                            # Add edge if both nodes exist
+                            if neighbor1 in net.get_nodes() and neighbor2 in net.get_nodes():
+                                net.add_edge(neighbor1, neighbor2, value=int(count), color=SUBGROUP_COLORS.get(group_name, 'gray'))
+
+                                # Print occurrence and edge counts
+                                neighbor1_occurrence = code_patient_group.get(neighbor1, 0)
+                                neighbor2_occurrence = code_patient_group.get(neighbor2, 0)
+                                print(f"Neighbor 1: {neighbor1} (Occurrence: {neighbor1_occurrence})")
+                                print(f"Neighbor 2: {neighbor2} (Occurrence: {neighbor2_occurrence})")
+                                print(f"Edge between {neighbor1} and {neighbor2}: {count} occurrences")
+                            
     if 'Condition' in co_occurrence_matrices:
         add_nodes_edges(net, pd.DataFrame(co_occurrence_matrices['Condition']), 'Co', 'Condition')
     if 'Observation' in co_occurrence_matrices:
@@ -499,8 +630,223 @@ def update_graph(selected_code, num_nodes_to_visualize, show_labels, data):
     net.show(temp_file_name)
     return open(temp_file_name, 'r').read()
 
+
+
+def create_dendrogram_plot(cooccurrence_array, labels):
+    fig, ax = plt.subplots(figsize=(20,5))
+    linked = linkage(cooccurrence_array, 'ward')
+    sch.dendrogram(linked, orientation='top', distance_sort='descending', show_leaf_counts=True, labels=labels, ax=ax)
+    plt.title('Dendrogram for Clustering')
+    plt.xlabel('Code')
+    plt.ylabel('Distance')
+    plt.tight_layout()
+
+    # Save the plot to a BytesIO object
+    img_bytes = io.BytesIO()
+    plt.savefig(img_bytes, format='png')
+    img_bytes.seek(0)
+    plt.close(fig)
+    
+    return base64.b64encode(img_bytes.getvalue()).decode('utf-8')
+
+
+
+@app.callback(
+    [Output('bar-chart', 'figure'),
+     Output('dendrogram', 'figure')],
+    [Input('code-dropdown', 'value'),
+     Input('show-labels', 'value'),
+     Input('num-nodes-slider', 'value')],
+    State('data-store', 'data')
+)
+def update_charts(selected_code, show_labels, slider_value, data):
+    if not selected_code:
+        return (
+            {
+                'data': [],
+                'layout': {'title': 'Select a code to see the bar chart'}
+            },
+            {
+                'data': [],
+                'layout': {'title': 'Dendrogram not available'}
+            }
+        )
+
+    # Retrieve the co-occurrence matrices and calculate occurrence counts
+    co_occurrence_matrices = data.get('co_occurrence_matrices', {})
+    main_df = pd.DataFrame(co_occurrence_matrices.get('Main', {}))
+    
+    frequency_distribution = main_df.sum(axis=1)
+    total_sum = frequency_distribution.sum()
+    code_patient_group = frequency_distribution / total_sum
+
+
+    # Get occurrences for selected code
+    #code_patient_group = flat_df.groupby('Codes')['PatientID'].nunique()
+    selected_code_occurrence = code_patient_group.get(selected_code, 0)
+
+    # Get top neighbors
+    neighbors_sorted = main_df.loc[selected_code].sort_values(ascending=False)
+    
+    # Define categories and initialize grouped neighbors
+    categories = ['Condition', 'Observation', 'Procedure']
+    grouped_neighbors = {cat: [] for cat in categories}
+    
+    # Sort neighbors into categories
+    for neighbor in neighbors_sorted.index:
+        for cat in categories:
+            if neighbor in co_occurrence_matrices.get(cat, {}):
+                grouped_neighbors[cat].append(neighbor)
+                break
+
+    # Create the sorted list of top neighbors by alternating categories
+    sorted_neighbors = []
+    for _ in range(len(neighbors_sorted)):
+        for cat in categories:
+            if grouped_neighbors[cat]:
+                sorted_neighbors.append(grouped_neighbors[cat].pop(0))
+                if len(sorted_neighbors) >= 10:  # Limit to top 10 neighbors
+                    break
+        if len(sorted_neighbors) >= 10:
+            break
+
+    # Ensure slider_value is defined and within a reasonable range
+    if slider_value is None:
+        slider_value = 0  # Default to 0 if slider_value is not provided
+
+    # Determine the number of neighbors to display based on slider value
+    num_neighbors_to_display = min(3 + slider_value * 3, len(sorted_neighbors))
+
+    # Prepare data for bar chart
+    bar_data = []
+    x_labels = []
+    y_values = []
+    line_widths = []
+    bar_colors = []
+
+    for neighbor in sorted_neighbors[:num_neighbors_to_display]:
+        occurrence_count = code_patient_group.get(neighbor, 0)
+        
+        # Determine the x-axis label based on the show-labels option
+        if 'show' in show_labels:
+            neighbor_label = flat_df.loc[flat_df['Codes'] == neighbor, 'Displays'].iloc[0]
+            selected_code_label = flat_df.loc[flat_df['Codes'] == selected_code, 'Displays'].iloc[0]
+        else:
+            neighbor_label = neighbor[2:]
+            selected_code_label = selected_code[2:]
+
+        bar_data.append({'x': neighbor_label, 'y': occurrence_count, 'code': neighbor})
+        x_labels.append(neighbor_label)
+        y_values.append(occurrence_count)
+        
+        # Set line width based on whether it is the selected code
+        if neighbor == selected_code:
+            line_widths.append(5)  # Thicker line for selected code
+        else:
+            line_widths.append(1)  # Thinner line for other bars
+
+        # Determine color for the bar based on subgroup
+        color = 'gray'  # Default color
+        for subgroup, color_code in SUBGROUP_COLORS.items():
+            if neighbor in co_occurrence_matrices.get(subgroup, {}):
+                color = color_code
+                break
+        bar_colors.append(color)
+
+    # Sort the bar data based on the 'code' value
+    bar_data_sorted = sorted(bar_data, key=lambda x: x['code'])
+    
+    # Extract sorted x and y values for the bar chart
+    sorted_x = [item['x'] for item in bar_data_sorted]
+    sorted_y = [item['y'] for item in bar_data_sorted]
+    sorted_line_widths = [line_widths[x_labels.index(item['x'])] for item in bar_data_sorted]
+    sorted_colors = [bar_colors[x_labels.index(item['x'])] for item in bar_data_sorted]
+
+    # Create the bar chart
+    bar_chart_figure = {
+        'data': [{
+            'x': sorted_x,
+            'y': sorted_y,
+            'type': 'bar',
+            'name': 'Occurrences',
+            'marker': {'color': sorted_colors},  # Assign colors to the barss
+            'line': {'width': sorted_line_widths},  # Set line width
+            'text': sorted_x,
+            'textposition': 'outside'
+        }],
+        'layout': {
+            'title': f'Frequency Distribution of {selected_code_label} and Top Neighbors',
+            'xaxis': {'title': 'Codes'},
+            'yaxis': {'title': 'Frequency'}
+        }
+    }
+
+
+    try:
+        # List of codes to include in the sub matrix
+        codes_of_interest = [selected_code] + sorted_neighbors[:num_neighbors_to_display]
+
+        def create_sub_cooccurrence_matrix(cooccurrence_dict, codes):
+            # Filter codes to ensure they are in the dictionary
+            valid_codes = [code for code in codes if code in cooccurrence_dict]
+
+            # Create a DataFrame for the sub matrix
+            sub_matrix = pd.DataFrame(
+                {code: {sub_code: cooccurrence_dict.get(code, {}).get(sub_code, 0) for sub_code in valid_codes} for code in valid_codes}
+            ).fillna(0)
+
+            return sub_matrix
+
+        # Extract the main co-occurrence dictionary
+        co_dict = co_occurrence_matrices.get('Main', {})
+
+        # Create the sub co-occurrence matrix
+        cooccurrence_dict = create_sub_cooccurrence_matrix(co_dict, codes_of_interest)
+        
+        # Symmetrize the matrix (since co-occurrence is undirected)
+        cooccurrence_matrix = cooccurrence_dict.dot(cooccurrence_dict.T)
+
+        # Replace NaN values with 0 (if any)
+        cooccurrence_matrix = cooccurrence_matrix.fillna(0)
+
+        # Convert matrix to array for clustering
+        cooccurrence_array = cooccurrence_matrix.values
+
+        # Perform Agglomerative Clustering
+        clustering = AgglomerativeClustering(n_clusters=2, metric='euclidean', linkage='ward')
+        cluster_labels = clustering.fit_predict(cooccurrence_array)
+
+        # Add cluster labels to the matrix
+        cooccurrence_matrix['Cluster'] = cluster_labels
+
+        # Generate the dendrogram plot
+        dendrogram_base64 = create_dendrogram_plot(cooccurrence_array, cooccurrence_matrix.index.tolist())
+
+        # Return the base64 string for the dendrogram
+        dendrogram_figure = {
+            'data': [{
+                'type': 'image',
+                'source': f'data:image/png;base64,{dendrogram_base64}',
+                'sizing': 'contain',
+                'name': 'Dendrogram'
+            }],
+            'layout': {
+                'title': 'Dendrogram',
+                'xaxis': {'visible': False},
+                'yaxis': {'visible': False}
+            }
+        }
+
+        return bar_chart_figure, dendrogram_figure
+
+    except Exception as e:
+        print(f"Error in generating dendrogram: {e}")
+        return bar_chart_figure, {'data': [], 'layout': {'title': 'Error generating dendrogram'}}
+
+
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8052)
+    app.run_server(debug=True, port=8051)
+
 
 # In[ ]:
 

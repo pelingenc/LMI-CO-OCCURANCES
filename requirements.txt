@@ -15,6 +15,14 @@ trino
 pyvis
 werkzeug
 gunicorn
+os
+tempfile
+base64
+io
+plotly
+scikit-learn
+matplotlib
+
 
 
 

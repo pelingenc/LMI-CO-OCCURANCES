@@ -15,7 +15,6 @@ trino
 pyvis
 werkzeug
 gunicorn
-os
 tempfile
 base64
 io

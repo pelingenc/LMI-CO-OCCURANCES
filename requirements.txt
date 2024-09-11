@@ -15,9 +15,6 @@ trino
 pyvis
 werkzeug
 gunicorn
-tempfile
-base64
-io
 plotly
 scikit-learn
 matplotlib

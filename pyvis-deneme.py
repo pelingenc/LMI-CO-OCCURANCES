@@ -310,7 +310,7 @@ def fetch_and_process_data(file_content):
 # 3. Create Dataset Directory
     new_directory_name = "CoCo_Input"
     #datasets_dir = create_dataset_directory(new_directory_name)
-    datasets_dir = os.path.join('C:/', new_directory_name)
+    datasets_dir = os.path.join('C:', new_directory_name)
 
     # Initialize a dictionary to hold the dataframes
     dataframes = {}

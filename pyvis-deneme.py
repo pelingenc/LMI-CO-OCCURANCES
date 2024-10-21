@@ -21,6 +21,7 @@ import scipy.cluster.hierarchy as sch
 from sklearn.cluster import AgglomerativeClustering
 
 
+
 SUBGROUP_COLORS = {
     'ICD': "#00bfff", #"#00bfff",
     'LOINC': "#ffc0cb", #"#ffc0cb",
@@ -225,6 +226,7 @@ def generate_network_viz(df, code1_col, code2_col, weight_col,
                 net.get_node(node)['y'] = pos[node][1] * 300  # Scale position for visualization
                 
     #net.toggle_physics(False)
+    net.show_buttons(filter_=['physics'])
     return net
 
 
@@ -308,7 +310,7 @@ def fetch_and_process_data(file_content):
 # 3. Create Dataset Directory
     new_directory_name = "CoCo_Input"
     #datasets_dir = create_dataset_directory(new_directory_name)
-    datasets_dir = os.path.join('C:\\', new_directory_name)
+    datasets_dir = os.path.join('C:/', new_directory_name)
 
     # Initialize a dictionary to hold the dataframes
     dataframes = {}

@@ -308,16 +308,22 @@ def fetch_and_process_data(file_content):
 
 ################################################################################################## 
 # 3. Create Dataset Directory
-    # Specify the new directory name
+    # Define the directory name
     new_directory_name = "CoCo_Input"
-    datasets_dir = os.path.join(r'C:\\', new_directory_name)  # Use raw string for the base path
+    # Correctly join the path using double backslashes or raw string
+    datasets_dir = os.path.join('C:\\', new_directory_name)  # Using double backslashes
     
-    # Ensure the directory exists
+    # Check if the directory exists
     if not os.path.exists(datasets_dir):
+        # If it doesn't exist, you can choose to create it (if needed)
         os.makedirs(datasets_dir)
+        print(f"Created directory: {datasets_dir}")
+    else:
+        print(f"Directory exists: {datasets_dir}")
     
-    # Print or log the message to inform users
-    datasets_dir = datasets_dir.replace('/', '\\') 
+    # Example message for users
+    user_friendly_path = r"C:\CoCo_Input"  # This will keep the path readable
+    output_message = f"Put the catalogue files into the directory: {user_friendly_path}"
 
     # Initialize a dictionary to hold the dataframes
     dataframes = {}

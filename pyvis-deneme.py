@@ -347,7 +347,7 @@ def fetch_and_process_data(file_content,datasets_dir):
                 'message': (
                     f"1. Put the catalogue files into the directory: {datasets_dir}\n"
                     f"2. Refresh the page.\n"
-                    f"3. Upload the data."
+                    f"3. Upload the data.")
             }
 
     # Continue processing with icd_df, ops_df, and loinc_df if needed

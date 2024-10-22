@@ -21,7 +21,6 @@ import scipy.cluster.hierarchy as sch
 from sklearn.cluster import AgglomerativeClustering
 
 
-
 SUBGROUP_COLORS = {
     'ICD': "#00bfff", #"#00bfff",
     'LOINC': "#ffc0cb", #"#ffc0cb",
@@ -64,13 +63,30 @@ server = app.server
 
 app.layout = html.Div([
     html.H1("CoCo: Co-Occurrences in FHIR Codes"),
-    dcc.Upload(
-        id='upload-data',
-        children=html.Button('Upload Data'),
-        multiple=False
-    ),
-    html.Div(id='upload-feedback', children='', style={'color': 'red'}),
 
+    # Create a row for upload button and directory input
+    html.Div(
+        [
+            dcc.Upload(
+                id='upload-data',
+                children=html.Button('Upload Data'),
+                multiple=False,
+                style={'margin-right': '10px'}  # Add some space between button and input
+            ),
+            # Input box for the user to specify the directory
+            html.Label('Enter the directory for the catalog files:', style={'margin-right': '10px'}),
+            dcc.Input(
+                id='directory-input',
+                type='text',
+                value='',  # Default value
+                style={'width': '300px'}  # Set a width for the input box
+            ),
+        ],
+        style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'}  # Flexbox for alignment
+    ),
+
+    # Output message area for feedback
+    html.Div(id='upload-feedback', children='', style={'color': 'red'}),
     
     # Slider for the number of top neighbor nodes
     html.Div(id='slider-container', children=[
@@ -292,7 +308,7 @@ def update_slider_visibility(selected_code):
         return {'display': 'block'}, {'display': 'none'}  # Show num-nodes slider, hide level slider
 
     
-def fetch_and_process_data(file_content):
+def fetch_and_process_data(file_content,datasets_dir):
     
     
 # 1. Read CSV data from uploaded content
@@ -308,22 +324,8 @@ def fetch_and_process_data(file_content):
 
 ################################################################################################## 
 # 3. Create Dataset Directory
-    # Define the directory name
-    new_directory_name = "CoCo_Input"
-    # Correctly join the path using double backslashes or raw string
-    datasets_dir = os.path.join('C:\\', new_directory_name)  # Using double backslashes
-    
-    # Check if the directory exists
-    if not os.path.exists(datasets_dir):
-        # If it doesn't exist, you can choose to create it (if needed)
-        os.makedirs(datasets_dir)
-        print(f"Created directory: {datasets_dir}")
-    else:
-        print(f"Directory exists: {datasets_dir}")
-    
-    # Example message for users
-    user_friendly_path = r"C:\CoCo_Input"  # This will keep the path readable
-    output_message = f"Put the catalogue files into the directory: {user_friendly_path}"
+#     new_directory_name = "CoCo_Input"
+#     datasets_dir = create_dataset_directory(new_directory_name)
 
     # Initialize a dictionary to hold the dataframes
     dataframes = {}
@@ -679,20 +681,18 @@ def fetch_and_process_data(file_content):
         }
     }
 
-
-
-
 @app.callback(
     Output('upload-feedback', 'children'),
     Output('data-container', 'style'),
     Output('code-dropdown', 'options'),
     Output('data-store', 'data'),  # Store `flat_df` and matrices here
-    Input('upload-data', 'contents')
+    Input('upload-data', 'contents'),
+    Input('directory-input', 'value')  # Capture the directory input
 )
+def upload_file(file_content, directory):
 
+    datasets_dir = directory.strip()  # Remove leading/trailing whitespace
 
-def upload_file(file_content):
-    
     if file_content is None:
         return "Please upload the FHIR dataset.", {'display': 'none'}, [], None
     feedback_message = ""
@@ -706,7 +706,7 @@ def upload_file(file_content):
         # Decode and process uploaded file
         content_type, content_string = file_content.split(',')
         decoded = base64.b64decode(content_string)
-        result = fetch_and_process_data(decoded)
+        result = fetch_and_process_data(decoded, datasets_dir)
 
 
         if result['success']:
@@ -732,6 +732,9 @@ def upload_file(file_content):
             feedback_message = result['message']
 
     return feedback_message, data_style, options, data
+
+
+
 
 
 @app.callback(

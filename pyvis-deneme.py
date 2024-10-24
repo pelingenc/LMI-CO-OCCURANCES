@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# # MAIN CODE
+
+# In[9]:
+
+
 import os
 import io
 import base64
@@ -1563,5 +1571,24 @@ def update_charts(selected_code, show_labels, slider_value, codes_of_interest, d
     
 if __name__ == '__main__':
     app.run_server(debug=True, port=8053)
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
 
 

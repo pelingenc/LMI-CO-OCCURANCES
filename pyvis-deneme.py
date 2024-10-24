@@ -125,7 +125,7 @@ app.layout = html.Div([
             dcc.Input(
                 id='n-input',
                 type='number',
-                value=1,  # Default value for n
+                value=4,  # Default value for n
                 style={'width': '60px'},
                 debounce=False 
             )

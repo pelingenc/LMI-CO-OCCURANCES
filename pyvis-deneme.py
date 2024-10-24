@@ -79,7 +79,8 @@ app.layout = html.Div([
                 id='directory-input',
                 type='text',
                 value='',  # Default value
-                style={'width': '300px'}
+                style={'width': '300px'},
+                debounce=False 
             ),
             html.Div(id='output-div'),
         ],

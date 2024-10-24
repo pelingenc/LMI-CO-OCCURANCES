@@ -79,7 +79,8 @@ app.layout = html.Div([
                 id='directory-input',
                 type='text',
                 value='',  # Default value
-                style={'width': '300px'}  # Set a width for the input box
+                style={'width': '300px'},  # Set a width for the input box
+                debounce=False
             ),
         ],
         style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'}  # Flexbox for alignment

@@ -77,7 +77,7 @@ app.layout = html.Div([
         [
             dcc.Upload(
                 id='upload-data',
-                children=html.Button('Upload Data', id='upload-button', disabled=False),  # Button disabled initially
+                children=html.Button('Upload Data', id='upload-button'),  # Button disabled initially
                 multiple=False,
                 style={'margin-right': '10px'}  # Add some space between button and input
             ),
@@ -186,17 +186,6 @@ app.layout = html.Div([
     
     dcc.Store(id='data-store')  # Hidden store to keep data
 ])
-
-# Callback to enable or disable the upload button based on directory input
-@app.callback(
-    Output('upload-button', 'disabled'),
-    Input('directory-input', 'value')
-)
-def toggle_upload_button(directory):
-    # Strip whitespace from directory input and check if it's empty
-    stripped_directory = directory.strip()
-    print(f"Directory entered: '{stripped_directory}'")  # Debugging print to inspect the directory
-    return not bool(stripped_directory)  # Disable button if directory is empty
 
 
 # Create co-occurrence matrices

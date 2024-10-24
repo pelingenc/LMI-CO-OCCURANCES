@@ -1,270 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# # CoCo: Analysis of Co-Occurrences in FHIR Codes
-# **Pelin Genc**  
-# **October 22, 2024**
-# <!-- This line will not be displayed. -->
-# 
-# ## 1 Introduction, Motivation and Problem Statement
-# The healthcare industry produces vast amounts of complex data, especially in the form of clinical codes such as ICD (International Classification of Diseases), LOINC (Logical Observation Identifiers Names and Codes), and OPS (German Procedure Classification). Analyzing the co-occurrences of these codes can reveal valuable insights into clinical patterns, as well as relationships between diagnoses, tests, and procedures. This application is designed to provide a flexible, interactive platform for visualizing these co-occurrences between Fast Healthcare Interoperability Resources (FHIR) codes using Dash, enabling users to explore the data effectively.
-# 
-# As datasets grow in size and complexity, interpreting relationships between healthcare codes becomes increasingly challenging. Without specialized visualization tools, healthcare professionals may find it difficult to extract meaningful patterns or insights from the data. The key challenge is to develop a user-friendly interface that allows users to upload datasets and visualize both inter- and intra-relationships across different resource types—such as ICD, LOINC, and OPS. Additionally, such tools should support the exploration of healthcare code co-occurrences to enhance the understanding of patient conditions.
-# 
-# In clinical decision-making, doctors often need to examine the broader context of a patient’s diagnosis by analyzing associated medical events and conditions. For example, a doctor treating a patient with diabetes may want to investigate which other medical conditions or events frequently co-occur with diabetes. Such an exploration could provide insights into potential comorbidities, complications, or treatment patterns commonly seen in diabetic patients. This type of analysis can inform the doctor’s treatment approach, drawing attention to other conditions that may require consideration or intervention.
-# 
-# ## 2 FHIR Data and SQL Query
-# 
-# ### FHIR Data Hierarchy
-# The FHIR standard defines a set of resource types.
-# 
-# **Administrative/Financial Resources:**
-# - Claim
-# - ExplanationOfBenefit
-# - ServiceRequest
-# - Coverage
-# 
-# **Clinical Resources:**
-# - Condition
-# - Procedure
-# - DiagnosticReport
-# - Observation
-# - Immunization
-# - CareTeam
-# - CarePlan
-# - MedicationRequest
-# - Encounter
-# 
-# **Document/Reference Resources:**
-# - DocumentReference
-# - ImagingStudy
-# - Provenance
-# 
-# These resource types follow an inter-referencing logic, where a particular resource type may reference codes from other resource types to highlight the dependency and flow of events between them. This relationship can be represented as a directed cycle, as shown in the figure below. The key resource types involved in below cyclic graph are Patient, E: Encounter, C: Condition, D: DiagnosticReport, O: Observation, P: Procedure.
-# The key resource types involved in the below cyclic graph are **Patient**, **E: Encounter**, **C: Condition**, **D: DiagnosticReport**, **O: Observation**, **P: Procedure**.
-# 
-# 
-# <!-- ![Directed Cycle of Resource Types in FHIR](Overleaf-images/Cycle-Patient-Encounter-Observation-Condition---.png) -->
-# 
-# <img src="Overleaf-images/Cycle-Patient-Encounter-Observation-Condition---.png" alt="Directed Cycle of Resource Types in FHIR" width="600"/>
-# 
-# 
-# 
-# **Figure 1:** Directed Cycle of Resource Types in FHIR
-# 
-# As shown in Figure 1, this interconnectedness creates a directional cycle among these resource types, where each type can reference others in a coherent manner. For example, the **Patient** resource serves as a fundamental building block in the healthcare domain. Each Patient can be involved in multiple **Encounters**, such as hospital visits, outpatient appointments, or emergency room admissions. During an Encounter, healthcare providers may gather various types of clinical data, which can include **Observations** (e.g., vital signs, lab results), **Conditions** (diagnoses), and **Procedures** (medical interventions). For instance, an Encounter references the Patient while also linking to various Observations and Conditions that arise during that Encounter. This cyclical nature enables comprehensive data modeling that reflects the complexity of patient care in real-world settings.
-# 
-# In the implementation of CoCo code, it is important to note that only the codes from the **Observation (LOINC)**, **Procedure (OPS)**, and **Condition (ICD)** resource types are utilized.
-# 
-# ### Executing SQL Queries in Python
-# Below is the pseudocode for executing SQL queries (for ICD as an example) using the trino connector in Python. The queries retrieve not only ICD, OPS, and LOINC data from a FHIR dataset that occurred during a specified time interval but also the full history of those codes for the same patients. 
-# 
-# ```sql
-# WITH TimeIntervalICD AS (
-#     SELECT
-#         encounter.subject.reference AS PatientID,
-#         condition_coding.code AS Codes,
-#         FROM_ISO8601_TIMESTAMP(condition.onsetdatetime) AS EncounterDate
-#     FROM
-#         fhir.qs.Encounter encounter
-#         LEFT JOIN UNNEST(encounter.diagnosis) AS encounter_diagnosis ON TRUE
-#         LEFT JOIN fhir.qs.Condition condition ON encounter_diagnosis.condition.reference = CONCAT('Condition/', condition.id)
-#         LEFT JOIN UNNEST(condition.code.coding) AS condition_coding ON TRUE
-#     WHERE
-#         condition_coding.code IS NOT NULL
-#         AND condition_coding.system = 'http://fhir.de/CodeSystem/bfarm/icd-10-gm'
-#         AND FROM_ISO8601_TIMESTAMP(condition.onsetdatetime) BETWEEN TIMESTAMP '2023-02-25 00:00:00' AND TIMESTAMP '2023-02-25 01:00:00'
-# ),
-# AllPatientICDCodes AS (
-#     SELECT
-#         encounter.subject.reference AS PatientID,
-#         condition_coding.code AS Codes,
-#         FROM_ISO8601_TIMESTAMP(condition.onsetdatetime) AS EncounterDate
-#     FROM
-#         fhir.qs.Encounter encounter
-#         LEFT JOIN UNNEST(encounter.diagnosis) AS encounter_diagnosis ON TRUE
-#         LEFT JOIN fhir.qs.Condition condition ON encounter_diagnosis.condition.reference = CONCAT('Condition/', condition.id)
-#         LEFT JOIN UNNEST(condition.code.coding) AS condition_coding ON TRUE
-#     WHERE
-#         condition_coding.code IS NOT NULL
-#         AND condition_coding.system = 'http://fhir.de/CodeSystem/bfarm/icd-10-gm'
-# )
-# SELECT
-#     p.PatientID,
-#     ARRAY_AGG(DISTINCT a.Codes) AS ICDCodesAllTime
-# FROM
-#     TimeIntervalICD p
-# JOIN
-#     AllPatientICDCodes a ON p.PatientID = a.PatientID
-# GROUP BY
-#     p.PatientID
-# 
-
-# ## 3 Methodology
-# The Dash application is structured around several key components, each with specific input and output arguments. Below is a breakdown of the code:
-# 
-# ### 3.1 User Interface Components
-# 
-# #### 3.1.1 Upload Component
-# In this section, users can upload the FHIR data previously downloaded via a SQL query. The dataset contains three columns: Patient (with anonymized numbering), Codes, and Resource Types, and is formatted as a Parquet file.
-# 
-# 
-# ![Data Upload Process in the Dash Application.](Overleaf-images/Upload_Data.png)
-# 
-# 
-# #### 3.1.2 Dropdown Menu
-# This dropdown menu contains all available codes from the FHIR dataset, along with an option labeled **ALL CODES** that allows users to visualize the broader relationships among all codes.
-# 
-# ![Dropdown Menu for Code Selection](Overleaf-images/Select_a_code.png)
-# 
-# 
-# #### 3.1.3 Sliders
-# The application includes two sliders designed to enhance user interaction and data visualization.
-# 
-# - **Level Slider for All Codes:** This slider is displayed when the user selects **selected code = 'ALL CODES'**. It allows users to choose from four different levels of hierarchy to visualize the PyVis graph in a hierarchical manner. Each level corresponds to a different depth in the code structure, enabling users both to explore various degrees of relationships among the codes and to avoid the complexity.
-# 
-# ![Hierarchy Level Slider](Overleaf-images/Hierarchy_Slider.png)
-# 
-# 
-# - **Node Count Slider for Individual Codes:** This slider is utilized when the user selects an individual code. It ranges from 1 to 10, allowing users to specify the number of top neighbors (most co-occurring nodes) to be displayed for the selected code.
-# 
-# ![Maximum Number of Nodes to Visualize](Overleaf-images/Top_Neighbors_Slider.png)
-# 
-# #### 3.1.4 Graphs
-# The application presents different types of graphs depending on whether an individual code or all codes are selected.
-# 
-# - **Graphs for Individual Codes:** For individual codes, three types of graphs are provided:
-# 
-#   - **PyVis Graph:** This graph visualizes the co-occurrences of the top neighbors of an individual code, categorized into three resource types: ICD, OPS, and LOINC. Each resource type is represented by a distinct color, facilitating quick identification of the types of relationships present.
-#   
-#   - **Dendrogram:** The dendrogram illustrates groups of codes that are likely to occur together, highlighting the likelihood of co-occurrence independent of resource type. Unlike the PyVis graph, which focuses on pairs, the dendrogram can reveal relationships among larger groups of codes, providing a comprehensive view of interconnections.
-#   
-#   - **Bar Chart:** This chart displays the frequency distribution of the selected code and its top neighbors, offering insights into the prevalence of these codes within the dataset.
-#   
-#   The maximum number of nodes to be visualized can be adjusted using the top neighbors slider. This functionality is essential for limiting the amount of data presented in the network visualization. The graph generated by this configuration visualizes Individual Codes. It displays the Top Neighbors using PyVis, highlighting clusters in a dendrogram and presenting frequencies in a bar chart. To ensure clarity and prevent overlapping of text labels, the labels are truncated. However, users can hover over a node to view the full label, which provides additional context for the data represented.
-# 
-#     ![Graphs for Individual Codes](Overleaf-images/Individual_codes-Top_neighbors_3Graphs_Show_Label-Full_label.png)
-# 
-# - **Graphs for All Codes:**
-# 
-#     When `ALL_CODES` is selected, a PyVis graph is displayed to illustrate the big picture of all FHIR codes.
-# 
-#     In the "All Codes" version of the visualization, a slider is provided with four levels to simplify the analysis and reduce complexity. Additionally, the "Enter Code" feature allows users to highlight a specific code among the entire dataset by coloring its node and the edges connected to it in a vibrant lime color. To prevent overlapping labels, the text is truncated, similar to the individual code view. However, users can hover over any node to reveal the full display of the code, ensuring that essential information is still accessible.
-# 
-#     ![All Codes Visualization with Hierarchy Level and Code Highlighting](Overleaf-images/All_codes-Hierarchy_Level-Enter_code-Show_labels-Full_label2.png)
-#     
-# ### 3.2 Co-Occurrence Matrix
-# The application generates a co-occurrence matrix based on the data processed earlier. This matrix quantifies relationships by counting how many patients share multiple codes. The following code demonstrates how to create a co-occurrence matrix.
-# 
-# ```python
-# # Pivot the DataFrame to create a patient matrix
-# patient_matrix = flat_df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
-# 
-# # Generate the co-occurrence matrix
-# co_occurrence_matrix = patient_matrix.T @ patient_matrix
-# 
-# 
-
-# ### 3.3 Overview of the Datasets
-# 
-# This section presents an overview of a Dash web application designed to visualize co-occurrences in FHIR (Fast Healthcare Interoperability Resources) codes. The following parts detail the data flow and the interrelationships among various components and functions within the application.
-# 
-# #### 3.3.1 Data Upload and Processing
-# 
-# The application begins by allowing users to upload a dataset through the `dcc.Upload` component. The uploaded data is then processed within the `upload_file` callback, which reads the file's content and sends it to the `fetch_and_process_data` function.
-# 
-# - **`fetch_and_process_data`**: This function processes the uploaded data and generates a structured output. It adds two key columns, `Displays` and `Full_Displays`, to the `flat_df`. The `Displays` column provides a truncated version of the information in the `Full_Displays` column, which contains complete and detailed descriptions. This distinction enhances data presentation while still granting access to comprehensive information when required. The `fetch_and_process_data` function outputs three primary data structures:
-# 
-#   - **`flat_df`**: This DataFrame contains three essential columns: `PatientID`, `Codes`, and `ResourceType`. The `PatientID` column includes anonymized integer identifiers starting from 1. The `Codes` column comprises various healthcare-related codes (e.g., ICD, LOINC, or OPS), while the `ResourceType` column categorizes each code's specific type (e.g., ICD for diagnoses, LOINC for lab tests, OPS for procedures).
-# 
-#     | PatientID | Codes    | ResourceType |
-#     |-----------|----------|--------------|
-#     | 1         | M87.24   | ICD          |
-#     | 1         | I41.1    | ICD          |
-#     | 1         | 9-694.t  | OPS          |
-#     | 1         | 8-826.0h | OPS          |
-#     | 1         | 6-008.gs | OPS          |
-#     | 1         | 5-812.n0 | OPS          |
-#     | 1         | 2951-2   | LOINC        |
-#     | 1         | 26450-7  | LOINC        |
-#     | 1         | 5894-1   | LOINC        |
-#     | 1         | 1988-5   | LOINC        |
-#     | 2         | U35.1    | ICD          |
-#     | 2         | T53.4    | ICD          |
-# 
-#     The labels added to the uploaded `flat_df` are sourced from FHIR catalogs that encompass various coding systems, including ICD, OPS, and LOINC. The following code snippets illustrate how these datasets are loaded:
-# 
-#     ```python
-#     icd_df = pd.read_csv('ICD_Katalog_2023_DWH_export_202406071440.csv') 
-#     ops_df = pd.read_csv('OPS_Katalog_2023_DWH_export_202409200944.csv')
-#     loinc_df = pd.read_csv('LOINC_DWH_export_202409230739.csv')  
-#     ```
-# 
-#     Additionally, the function `get_display_label` is employed to retrieve the appropriate display labels based on the provided code, level, and resource type.
-# 
-#     | PatientID | Codes    | ResourceType | Displays                 | Full_Displays                                                    |
-#     |-----------|----------|--------------|--------------------------|-----------------------------------------------------------------|
-#     | 1         | M87.24   | ICD          | Knochennekrose           | Knochennekrose durch vorangegangenes Trauma: ...                |
-#     | 1         | I41.1    | ICD          | Myokarditis              | Myokarditis bei anderenorts klassifizierten Viruserkrankungen ...|
-#     | 1         | 9-694.t  | OPS          | Spezifische Behandlung    | Spezifische Behandlung im besonderen Setting bei ...            |
-#     | 1         | 8-826.0h | OPS          | Doppelfiltrationsplasmapherese | Doppelfiltrationsplasmapherese (DFPP): Ohne K ...             |
-#     | 1         | 6-008.gs | OPS          | Applikation von Medikamenten | Applikation von Medikamenten, Liste 8: Isavuconazol ...        |
-#     | 1         | 5-812.n0 | OPS          | Arthroskopie             | Arthroskopische Operation am Gelenkknorpel ...                 |
-#     | 1         | 2951-2   | LOINC        | Sodium [Moles/volume]    | Sodium [Moles/volume] in Serum or Plasma                        |
-#     | 1         | 26450-7  | LOINC        | Eosinophils              | Eosinophils/100 leukocytes in Blood                             |
-#     | 1         | 5894-1   | LOINC        | Prothrombin time         | Prothrombin time (PT) actual/normal in Platelets ...            |
-#     | 1         | 1988-5   | LOINC        | C reactive protein       | C reactive protein [Mass/volume] in Serum or Plasma            |
-#     | 2         | U35.1    | ICD          | Nicht belegte Schlüsselnummer | Nicht belegte Schlüsselnummer U35.1                           |
-#     | 2         | T53.4    | ICD          | Toxische Wirkung         | Toxische Wirkung: Dichlormethan                                 |
-# 
-#   - **`co_occurrences_df`**: This DataFrame illustrates co-occurrences of codes among patients and provides insights into relationships between various codes.
-# 
-# - **`co_occurrence_matrix_df`**: This DataFrame illustrates co-occurrences of codes among patients, indicating the number of patients sharing pairs of codes.
-# 
-# |         | M87.24 | I41.1 | U35.1 | T53.4 | 9-694.t | 8-826.0h | 6-008.gs | 5-812.n0 | 2951-2 | 26450-7 | 5894-1 | 1988-5 |
-# |---------|--------|-------|-------|-------|---------|----------|----------|----------|--------|---------|--------|--------|
-# | **M87.24** | 1      | 0     | 0     | 0     | 0       | 0        | 0        | 0        | 0      | 0       | 0      | 0      |
-# | **I41.1**  | 0      | 1     | 0     | 0     | 0       | 0        | 0        | 0        | 0      | 0       | 0      | 0      |
-# | **U35.1**  | 0      | 0     | 1     | 0     | 0       | 0        | 0        | 0        | 0      | 0       | 0      | 0      |
-# | **T53.4**  | 0      | 0     | 0     | 1     | 0       | 0        | 0        | 0        | 0      | 0       | 0      | 0      |
-# | **9-694.t**| 0      | 0     | 0     | 0     | 1       | 1        | 1        | 1        | 0      | 0       | 0      | 0      |
-# | **8-826.0h**| 0      | 0     | 0     | 0     | 1       | 1        | 1        | 1        | 0      | 0       | 0      | 0      |
-# | **6-008.gs**| 0      | 0     | 0     | 0     | 1       | 1        | 1        | 1        | 0      | 0       | 0      | 0      |
-# | **5-812.n0**| 0      | 0     | 0     | 0     | 1       | 1        | 1        | 1        | 0      | 0       | 0      | 0      |
-# | **2951-2** | 0      | 0     | 0     | 0     | 0       | 0        | 0        | 0        | 1      | 1       | 1      | 1      |
-# | **26450-7**| 0      | 0     | 0     | 0     | 0       | 0        | 0        | 0        | 1      | 1       | 1      | 1      |
-# | **5894-1** | 0      | 0     | 0     | 0     | 0       | 0        | 0        | 0        | 1      | 1       | 1      | 1      |
-# | **1988-5** | 0      | 0     | 0     | 0     | 0       | 0        | 0        | 0        | 1      | 1       | 1      | 1      |
-# 
-# 
-# ## 4 Limitations and Future Improvements
-# 
-# Despite its strengths, the CoCo application has limitations:
-# 
-# 1. **Performance Issues**: With larger dataset sizes, the user experience may be impacted. Significant time is required for data uploads and visualization rendering.
-# 2. **Data Imbalance**: A noted imbalance in the prevalence of LOINC codes compared to ICD and OPS codes could skew insights derived from the visualizations.
-# 
-#      
-#    <!-- ![Node Degree Distribution](Overleaf-images/Node_degree_distribution.png) -->
-#    
-#    <img src="Overleaf-images/Node_degree_distribution.png" alt="Node Degree Distribution" width="700" />
-# 
-#    *Figure: Node Degree Distribution*
-# 
-# 3. **Missing Codes**: Some codes present in real FHIR datasets may not exist in catalogs, affecting the visualization and label display.
-# 
-# Future improvements could focus on enhancing the performance of the application, expanding the database of available codes, and incorporating additional data sources to enrich the analysis.
-# 
-# ## 5 Conclusion
-# 
-# The CoCo software represents a significant advancement in analyzing co-occurrences among clinical codes within FHIR datasets. By providing flexible and interactive visualizations, it enhances the understanding of complex clinical relationships, thus aiding healthcare professionals in decision-making and patient care.
-# 
-
-# # LIBRARY
-
-# In[1]:
-
-
 import os
 import io
 import base64
@@ -288,16 +21,6 @@ import scipy.cluster.hierarchy as sch
 from sklearn.cluster import AgglomerativeClustering
 
 
-
-# # MAIN CODE
-
-# ### Colors of Resource Types
-# The `SUBGROUP_COLORS` dictionary assigns specific colors to different resource types: **ICD** is represented in **light blue**, **LOINC** in **pink**, and **OPS** in **purple**.
-# 
-
-# In[2]:
-
-
 SUBGROUP_COLORS = {
     'ICD': "#00bfff", #"#00bfff",
     'LOINC': "#ffc0cb", #"#ffc0cb",
@@ -308,14 +31,6 @@ SUBGROUP_COLORS = {
 def get_color_for_resource_type(resource_type):
     """Map resource types to colors using SUBGROUP_COLORS."""
     return SUBGROUP_COLORS.get(resource_type, 'gray')  # Default to gray if not found
-
-
-# ### Assigning Resource Types depending on their encoding properties
-# This code segment provides functions to validate and classify medical codes for ICD, LOINC, and OPS, ensuring that only properly formatted codes are processed within the application.
-# 
-
-# In[3]:
-
 
 def is_icd_code(code):
     """Check if the given code is a valid ICD code."""
@@ -341,25 +56,6 @@ def get_resource_type(code):
         return "Unknown"
 
 
-# ### Dash Application Setup Components
-# 
-# 
-# - **dcc.Upload(...)**: This component allows users to upload FHIR data. 
-# 
-# - **dcc.Slider(...)**: Implements a slider for user input for adjusting parameters like the number of nodes to visualize or the hierarchy level.
-# 
-# - **dcc.Dropdown(...)**: Creates a dropdown menu that allows users to select a code from a list. 
-# 
-# - **dcc.Checklist(...)**: If checked, labels are shown.
-# 
-# - **dcc.Loading(...)**: Displays a loading spinner or indicator while data is being processed or loaded.
-# 
-# - **dcc.Graph(...)**: Pyvis, bar chartand dendogram are plotted.
-# 
-
-# In[4]:
-
-
 # Dash application setup
 app = dash.Dash(__name__)
 server = app.server
@@ -367,13 +63,32 @@ server = app.server
 
 app.layout = html.Div([
     html.H1("CoCo: Co-Occurrences in FHIR Codes"),
-    dcc.Upload(
-        id='upload-data',
-        children=html.Button('Upload Data'),
-        multiple=False
-    ),
-    html.Div(id='upload-feedback', children='', style={'color': 'red'}),
 
+    # Create a row for upload button and directory input
+    html.Div(
+        [
+            dcc.Upload(
+                id='upload-data',
+                children=html.Button('Upload Data', id='upload-button'),  # Button disabled initially
+                multiple=False,
+                style={'margin-right': '10px'}  # Add some space between button and input
+            ),
+            # Input box for the user to specify the directory
+            html.Label('Enter the directory for the catalog files:', style={'margin-right': '10px', 'color': 'red'}),
+            dcc.Input(
+                id='directory-input',
+                type='text',
+                value='',  # Default value
+                style={'width': '300px'},
+                debounce=False 
+            ),
+            html.Div(id='output-div'),
+        ],
+        style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'}  # Flexbox for alignment
+    ),
+
+    # Output message area for feedback
+    html.Div(id='upload-feedback', children='', style={'color': 'red'}),
     
     # Slider for the number of top neighbor nodes
     html.Div(id='slider-container', children=[
@@ -391,18 +106,34 @@ app.layout = html.Div([
     
     # Slider for the hierarchy levels
     html.Div(id='level-slider-container', children=[
-        html.Label("Select the hierarchy level:"),
-        dcc.Slider(
-            id='level-slider',
-            min=1,
-            max=4,
-            step=1,
-            value=1,
-            marks={i: str(i) for i in range(5)},  # 0 to 4
-            tooltip={"placement": "bottom", "always_visible": False}
-        )
-    ], style={'display': 'none'}),  # Initially hidden 
-    
+        html.Label("Select the hierarchy level:", style={'margin-right': '10px'}),
+        # Wrap the slider in a Div to control the width
+        html.Div(
+            dcc.Slider(
+                id='level-slider',
+                min=1,
+                max=4,
+                step=1,
+                value=1,
+                marks={i: str(i) for i in range(1, 5)},  # 1 to 4
+                tooltip={"placement": "bottom", "always_visible": False}
+            ),
+            style={'width': '300px'}  # Set a custom width for the slider wrapper
+        ),
+        # User input for n next to the slider
+        html.Div(children=[
+            html.Label('Enter value for n, max. number of codes on the leaves of the tree:', style={'margin-left': '10px', 'margin-right': '10px', 'margin-bottom': '5px'}),
+            dcc.Input(
+                id='n-input',
+                type='number',
+                value=1,  # Default value for n
+                style={'width': '60px'},
+                debounce=False 
+            )
+        ], style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'} )  # Flexbox for alignment
+    ], style={'display': 'none'}),  # Initially hidden
+
+
     html.Div([
         html.Label("Select a code:"),
         dcc.Dropdown(
@@ -449,46 +180,6 @@ app.layout = html.Div([
 ])
 
 
-# ### Co-Occurrence Matrix Creation
-# 
-# The `create_co_occurrence_matrix` function generates a co-occurrence matrix from a dataset of patient codes, summarizing how different codes appear together among patients.
-# 
-# ### Example Dataset
-# | PatientID | Codes  |
-# |-----------|--------|
-# | P1        | A      |
-# | P1        | B      |
-# | P2        | A      |
-# | P2        | C      |
-# | P3        | B      |
-# | P3        | C      |
-# | P3        | D      |
-# 
-# **Create Patient-Codes Matrix**: Constructs a pivot table that counts the occurrences of codes for each patient.
-# #### Patient-Codes Matrix
-# | PatientID | A | B | C | D |
-# |-----------|---|---|---|---|
-# | P1        | 1 | 1 | 0 | 0 |
-# | P2        | 1 | 0 | 1 | 0 |
-# | P3        | 0 | 1 | 1 | 1 |
-# 
-# **Calculate Co-Occurrence Matrix**: Uses a dot product of the transposed patient matrix to create a co-occurrence matrix representing how often each pair of codes appears together.
-# **Return the Matrix**: Provides the resulting co-occurrence matrix for further analysis.
-# 
-# #### Co-Occurrence Matrix Example
-# |     | A | B | C | D |
-# |-----|---|---|---|---|
-# | A   | 0 | 2 | 1 | 0 |
-# | B   | 2 | 0 | 2 | 1 |
-# | C   | 1 | 2 | 0 | 1 |
-# | D   | 0 | 1 | 1 | 0 |
-# 
-# ### Summary
-# The co-occurrence matrix reveals relationships between different codes based on their simultaneous occurrences across patients, facilitating insights into associations among conditions or procedures.
-# 
-
-# In[5]:
-
 
 # Create co-occurrence matrices
 def create_co_occurrence_matrix(df):
@@ -500,14 +191,6 @@ def create_co_occurrence_matrix(df):
     np.fill_diagonal(co_occurrence_matrix.values, 0)
     return co_occurrence_matrix
 
-
-# ### Rescale Node Size and Edge Thickness
-# The `normalize_weights` function rescales a node size and edge thickness depending on the maximum and minimum weights in an uploaded dataset.
-#     
-
-# In[6]:
-
-
 def normalize_weights(value, gain=1, offset=0, min_limit=None, max_limit=None):
     # Normalize the value
     normalized_value = (value * gain) + offset
@@ -518,28 +201,6 @@ def normalize_weights(value, gain=1, offset=0, min_limit=None, max_limit=None):
         normalized_value = min(max_limit, normalized_value)
 
     return normalized_value
-
-
-# ### Pyvis Graph if ALL_Codes is selected
-# The `generate_network_viz` function creates a network visualization using the PyVis library, transforming a pandas DataFrame into a NetworkX graph, applying various visual attributes such as node colors, edge colors, and thickness, while also allowing for specific layouts like circular arrangements for nodes at a selected level, and incorporating physics parameters to enhance the visual representation of relationships in the data.
-# 
-# #### net.toggle_physics(True)
-# A physics control button will appear in the visualization, allowing users to dynamically adjust the following parameters:
-# 
-# - **central_gravity**: Influences the strength of the attractive force toward the center of the network.
-# - **node_distance**: Sets the minimum distance between nodes in the graph.
-# - **spring_length**: Determines the resting length of the springs connecting the nodes.
-# - **spring_constant**: Affects the stiffness of the springs; a higher value results in a stronger pull between nodes.
-# - **spring_strength**: Governs how strongly nodes are attracted to each other.
-# - **damping**: Controls the damping effect, which reduces oscillations in node movement over time.
-# - **min_velocity**: Sets the minimum speed for the nodes in the simulation, ensuring they do not come to a complete stop. 
-# 
-# #### net.toggle_physics(False)
-# The `net.toggle_physics(False)` line, when uncommented, disables the physics simulation in the PyVis network visualization, allowing for a static layout of the nodes and edges, which can help maintain the arrangement of the graph when presenting the network without dynamic movement.
-# 
-# 
-
-# In[7]:
 
 
 def generate_network_viz(df, code1_col, code2_col, weight_col, 
@@ -599,14 +260,8 @@ def generate_network_viz(df, code1_col, code2_col, weight_col,
                 net.get_node(node)['y'] = pos[node][1] * 300  # Scale position for visualization
                 
     #net.toggle_physics(False)
+    net.show_buttons(filter_=['physics'])
     return net
-
-
-# ### Dendogram  if an individual code is selected
-# The advantage of the dendrogram plot is that it visually represents multiple nodes (more than two) that frequently co-occur together, allowing for easy identification of complex relationships within the dataset.
-# 
-
-# In[8]:
 
 
 def create_dendrogram_plot(cooccurrence_array, labels, flat_df, show_labels):
@@ -638,14 +293,6 @@ def create_dendrogram_plot(cooccurrence_array, labels, flat_df, show_labels):
     
     return fig
 
-
-# ### CoCo_Input folder will be created on the user desktop for the catalogues
-# The `create_dataset_directory` function creates a folder on the user's desktop called CoCo_Input, and within that folder, there should be the three catalogues of ICD, OPS, and LOINC.
-# 
-
-# In[9]:
-
-
 def create_dataset_directory(directory_name):
     # Get the user's home directory
     home_directory = os.path.expanduser("~")
@@ -665,14 +312,7 @@ def create_dataset_directory(directory_name):
         print(f"Error creating directory: {str(e)}")
         return None
 
-
-# ###
-# ### Dash callback: `update_slider_visibility`
-# The `update_slider_visibility` function dynamically adjusts the visibility of sliders based on the user's selection in the code dropdown; if "ALL_CODES" is selected, it displays a slider for hierarchical levels (1 to 4), while for individual codes, it shows a slider for the top neighbors with which they most frequently co-occur.
-# 
-
-# In[10]:
-
+    
 
 @app.callback(
     Output('slider-container', 'style'),
@@ -685,43 +325,8 @@ def update_slider_visibility(selected_code):
     else:
         return {'display': 'block'}, {'display': 'none'}  # Show num-nodes slider, hide level slider
 
-
-# ### Preparing the data
-# It performs data loading, validation, analysis, and structuring, ultimately preparing the data for further processing
-# 
-# 1. **Read Data**: Load CSV data from the uploaded Parquet file into a DataFrame (`flat_df`).
-# 
-# 2. **Check Required Columns**: Verify that the necessary columns (`PatientID`, `Codes`, `ResourceType`) exist in `flat_df`.
-# 
-# 3. **Create Dataset Directory**: Define a directory name ("CoCo_Input") and create the corresponding directory on the user's desktop.
-# 
-# 4. **Load External Datasets**: Load three catalogues (ICD, OPS, LOINC) from the created directory.
-# 
-# 5. **Process DataFrames**: Extract and prepare DataFrames for each resource type (ICD, OPS, LOINC).
-# 
-# 6. **Generate Co-occurrence Matrix**: Create a co-occurrence matrix from the `flat_df` using a helper function `create_co_occurrence_matrix`.
-# 
-# 7. **Create Code Pairs**: Iterate through the co-occurrence matrix to create pairs of codes with their weights and add these to a DataFrame (`pairs_df`).
-# 
-# 8. **Build Hierarchies**: Construct hierarchical structures for each code set (ICD, OPS, LOINC) using a helper function (`build_hierarchy_and_get_pairs`).
-# 
-# 9. **Add parents from the catalogues**: Append new rows for the hierarchy levels (0, 1, 2, 3) coming from the cataglogues(`new_rows`).
-# 
-# 10. **Combine DataFrames**: Convert `new_rows` into a DataFrame (`new_entries_df`) and concatenate it with `pairs_df` to form `new_pairs_df`.
-# 
-# 11. **Add Displays (labels)**: Fill in the `Displays` column in `flat_df` based on the resource type and other conditions.
-# 
-# 12. **Segment DataFrames**: Split `flat_df` into separate DataFrames for each resource type (ICD, LOINC, OPS).
-# 
-# 13. **Generate Co-occurrence Matrices for Resource Types**: Create co-occurrence matrices for each specific resource type.
-# 
-# 14. **Return Results**: Return a dictionary containing `flat_df`, co-occurrence matrices, and `new_pairs_df`.
-# 
-
-# In[11]:
-
-
-def fetch_and_process_data(file_content):
+    
+def fetch_and_process_data(file_content, icd_df, ops_df, loinc_df):
     
     
 # 1. Read CSV data from uploaded content
@@ -734,36 +339,6 @@ def fetch_and_process_data(file_content):
     missing_columns = [col for col in required_columns if col not in flat_df.columns]
     if missing_columns:
         raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
-
-################################################################################################## 
-# 3. Create Dataset Directory
-    new_directory_name = "CoCo_Input"
-    datasets_dir = create_dataset_directory(new_directory_name)
-
-    # Initialize a dictionary to hold the dataframes
-    dataframes = {}
-    file_names = {
-        'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
-        'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
-        'LOINC': 'LOINC_DWH_export_202409230739.csv'
-    }
-
-##################################################################################################
-# 4. Load External Datasets
-    for key, filename in file_names.items():
-        file_path = os.path.join(datasets_dir, filename)
-        try:
-            dataframes[key] = pd.read_csv(file_path)
-        except FileNotFoundError:
-            return {
-                'success': False,
-                'message': f"Put the catalogue files into the directory: {datasets_dir}"
-            }
-
-    # Continue processing with icd_df, ops_df, and loinc_df if needed
-    icd_df = dataframes.get('ICD')
-    ops_df = dataframes.get('OPS')
-    loinc_df = dataframes.get('LOINC')
 
 ##################################################################################################
 # 5. Process DataFrames:
@@ -1094,38 +669,18 @@ def fetch_and_process_data(file_content):
         }
     }
 
-
-# ###
-# ### Dash callback: `upload_file`
-# 
-# The `upload_file` function is a Dash callback that:
-# 
-# - **Handles File Uploads**: Processes user-uploaded files.
-# - **Provides User Feedback**: Displays messages based on upload status.
-# - **Updates UI Components**: Modifies dropdown options and visibility of data containers based on the uploaded data.
-# - **Stores Processed Data**: Saves structured data (like `flat_df`, co-occurrence matrices) for later use in the application.
-# 
-# ### Key Outputs
-# - **Feedback Message**: Informs the user about the upload status.
-# - **Data Container Style**: Controls visibility based on file upload success.
-# - **Dropdown Options**: Updates available choices based on processed data.
-# - **Stored Data**: Keeps processed data for further interaction.
-# 
-
-# In[12]:
-
-
 @app.callback(
     Output('upload-feedback', 'children'),
     Output('data-container', 'style'),
     Output('code-dropdown', 'options'),
     Output('data-store', 'data'),  # Store `flat_df` and matrices here
-    Input('upload-data', 'contents')
+    Input('upload-data', 'contents'),
+    Input('directory-input', 'value')  # Capture the directory input
 )
+def upload_file(file_content, directory):
 
+    datasets_dir = directory.strip()  # Remove leading/trailing whitespace
 
-def upload_file(file_content):
-    
     if file_content is None:
         return "Please upload the FHIR dataset.", {'display': 'none'}, [], None
     feedback_message = ""
@@ -1134,12 +689,39 @@ def upload_file(file_content):
     data = {}
     
     print('file_content',file_content)
+    
+    if datasets_dir: 
+            # Initialize a dictionary to hold the dataframes
+        dataframes = {}
+        file_names = {
+            'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
+            'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
+            'LOINC': 'LOINC_DWH_export_202409230739.csv'
+        }
+
+        for key, filename in file_names.items():
+            file_path = os.path.join(datasets_dir, filename)
+            try:
+                dataframes[key] = pd.read_csv(file_path)
+            except FileNotFoundError:
+                return {
+                    'success': False,
+                    'message': (
+                        f"1. Put the catalogue files into the directory: {datasets_dir}\n"
+                        f"2. Refresh the page.\n"
+                        f"3. Upload the data.")
+                }
+
+        # Continue processing with icd_df, ops_df, and loinc_df if needed
+        icd_df = dataframes.get('ICD')
+        ops_df = dataframes.get('OPS')
+        loinc_df = dataframes.get('LOINC')
 
     if file_content:
         # Decode and process uploaded file
         content_type, content_string = file_content.split(',')
         decoded = base64.b64decode(content_string)
-        result = fetch_and_process_data(decoded)
+        result = fetch_and_process_data(decoded, icd_df, ops_df, loinc_df)
 
 
         if result['success']:
@@ -1167,56 +749,7 @@ def upload_file(file_content):
     return feedback_message, data_style, options, data
 
 
-# ### 
-# ### Dash callback: `update_graph`
-# ### PYVIS VISUALIZATION
-# 
-# 1. **Callback Definition**:  
-#    The `@app.callback` listens to inputs (dropdowns, sliders, user inputs) and updates the graph, codes of interest, and visualization styles accordingly.
-# 
-# 2. **Inputs**:  
-#    Load necessary data frames (`flat_df`, `co_occurrence_matrices`, `new_pairs_df`, `main_df`) from the `data-store`.
-# 
-# #### Plotting Pyvis Graphs for All_codes
-# 
-# 3. **If All Codes Selected**:  
-#    - Calculate node sizes and shapes based on code levels.
-#    - Find top nodes per resource type.
-#    - Identify ancestor codes across levels and merge them into a result dataframe (`result_df`).
-# 
-# 4. **Update Weights**:  
-#    Calculate and propagate weights for nodes across different levels (3, 2, 1).
-# 
-# 5. **Network Graph Update**:  
-#    - Filter `result_df` based on the selected level and update node/edge data.
-#    - Adjust edge colors, node styles, and sizes dynamically based on the selected level.
-# 
-# 6. **User Entry Code Highlighting**:  
-#    If a user enters a code, highlight it in the graph for better visibility.
-# 
-# 
-# #### Plotting Pyvis Graphs for individual codes
-# 
-# 7. **Neighbors of Selected Code**:  
-#    Compute the degree (number of neighbors) for each node in the network using the `main_df` data frame. Sort the neighbors of the `selected_code` by their co-occurrence values and store them in `neighbors_sorted`. Then, gather all top neighbors.
-# 
-# 8. **Helper Function (`add_nodes_edges`)**:  
-#    Define a function to add nodes and edges to the network graph.
-# 
-#    - Iterate through the neighbor codes.
-#    - Based on the resource group (ICD, LOINC, OPS), identify the top neighbor.
-#    - Store top neighbor info and its connected neighbors.
-#    - Compute node size using `normalize_weights` and add the `selected_code` and `top_neighbor` to the graph.
-#    - Add edges between nodes and normalize edge thickness using co-occurrence values.
-# 
-# 9. **Top Neighbor Relations**:  
-#    For each top neighbor, check its other neighbors and add them to the graph.
-# 
-# 10. **Co-occurrence Matrices**:  
-#    For each resource type (ICD, LOINC, OPS), check if a co-occurrence matrix is present, and if so, use it to add nodes and edges by calling `add_nodes_edges()`.
-# 
 
-# In[13]:
 
 
 @app.callback(
@@ -1229,12 +762,13 @@ def upload_file(file_content):
      Input('num-nodes-slider', 'value'),
      Input('level-slider', 'value'),
      Input('show-labels', 'value'),
-     Input('code-input', 'value'),  # Add input for user code
+     Input('code-input', 'value'), 
+     Input('n-input', 'value'),
      State('data-store', 'data')]
 )
 
 
-def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_labels, user_code, data):
+def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_labels, user_code, n, data):
   
 
     EDGE_THICKNESS_MIN = 1
@@ -1314,7 +848,7 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
 
 # MAX NUMBER OF NODES TO BE SHOWN ON THE LEAFS
 
-        n = 10  # You can change this value to get more or fewer top nodes
+        #n = 10  # You can change this value to get more or fewer top nodes
 
         # Group by ResourceType, sort by Degree in descending order, and take the top 'n' nodes for each group
         top_n_per_resource = node_degrees.groupby('ResourceType').apply(lambda x: x.nlargest(n, 'Degree')).reset_index(drop=True)
@@ -1867,194 +1401,6 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
 
 
 
-# ### 
-# ### Dash callback: `update_charts`
-# ### DENDOGRAM AND BAR CHART VISUALIZATION
-# 1. The callback function updates two charts (a bar chart and a dendrogram) based on user inputs such as the selected code, visibility of labels, the number of nodes, and codes of interest.
-# 3. It retrieves co-occurrence matrices and computes a frequency distribution of the selected code and its neighbors to build the bar chart.
-# #### Calculate frequency distribution:
-# 
-# | Code  | A   | B   | C   |
-# |-------|-----|-----|-----|
-# | A     | 5   | 3   | 1   |
-# | B     | 3   | 4   | 2   |
-# | C     | 1   | 2   | 3   |
-# 
-# ###. Steps:
-# 
-# 1. **Inputs:**
-#    - `codes_of_interest`: `['A', 'B', 'C']`.
-# 
-# 2. **Frequency Distribution:**
-#    - Sum co-occurrence values: 
-#      - **A = 9**, **B = 9**, **C = 6**.
-#    - Total: 24, so relative frequencies are:
-#      - **A = 0.375**, **B = 0.375**, **C = 0.25**.
-# 
-# 3. **Bar Chart:**
-#    - Displays frequencies for **A**, **B**, and **C** on the y-axis.
-# 
-# 4. **Dendrogram:**
-#    - Clusters **A**, **B**, and **C** based on their co-occurrence.
-# 
-# 4. The dendrogram is generated using a clustering technique based on the co-occurrence matrix, grouping similar codes for visualization.
-# 
-# 
-# 
-# 
-# #### Mathematical Explanation of Dendrogram Generation
-# 
-# 1. **Co-Occurrence Matrix:**
-# Co-occurrence values indicate how often two codes appear together in a dataset. High co-occurrence values suggest a strong relationship, while low values indicate weaker connections.
-# Codes with high co-occurrence values will be near.
-# Codes with low co-occurrence values will be far apart, indicating less of a relationship.
-#    - Let \( M \) be the co-occurrence matrix where \( M[i][j] \) represents the frequency of co-occurrence between code \( i \) and code \( j \). 
-#    - For example, for codes \( A, B, C \), the matrix \( M \) can be represented as:
-# 
-#    \[
-#    M = 
-#    \begin{bmatrix}
-#    5 & 3 & 1 \\
-#    3 & 4 & 2 \\
-#    1 & 2 & 3
-#    \end{bmatrix}
-#    \]
-# 
-# 2. **Distance Calculation:**
-#    - Calculate the distance (or dissimilarity) between codes based on the co-occurrence values. A common measure is the **Euclidean distance**:
-# 
-# To calculate the distance between codes \(i\) and \(j\) in a co-occurrence matrix, we can again use the Euclidean distance formula. In the context of three codes (let's say \(i\), \(j\), and \(k\)), the distance \(d(i,j)\) will depend on the values in the co-occurrence matrix for all three codes.
-# 
-# ##### Example Co-Occurrence Matrix
-# 
-# Let’s define a co-occurrence matrix \(M\) for three codes \(A\), \(B\), and \(C\):
-# 
-# $$
-# M = 
-# \begin{bmatrix}
-# 5 & 3 & 1 \\
-# 3 & 4 & 2 \\
-# 1 & 2 & 3
-# \end{bmatrix}
-# $$
-# 
-# ##### Distance Calculation
-# 
-# The distance \(d(i,j)\) between two codes \(i\) and \(j\) can be computed as follows:
-# 
-# $$
-# d(i,j) = \sqrt{\sum_k (M[i][k] - M[j][k])^2}
-# $$
-# 
-# Where:
-# - \(M[i][k]\) is the co-occurrence value for code \(i\) with respect to code \(k\).
-# - The sum is taken over all possible codes \(k\).
-# 
-# 
-# ##### Identify the Rows in the Matrix:
-# 
-# For Code \(A\): 
-# $$
-# M[A] = [5, 3, 1]
-# $$
-# 
-# For Code \(B\): 
-# $$
-# M[B] = [3, 4, 2]
-# $$
-# 
-# ##### Subtract the Values:
-# 
-# If the co-occurrence of \( A \) with \( B \) (3) is much higher than the co-occurrence of \( C \) with \( B \) (2), then \( A \) is more closely related to \( B \) than \( C \) is. The subtraction will yield a positive value, indicating this relative closeness.
-# 
-# $$
-# M[A] - M[B] = 
-# \begin{bmatrix}
-# 5 - 3 \\
-# 3 - 4 \\
-# 1 - 2
-# \end{bmatrix}
-# =
-# \begin{bmatrix}
-# 2 \\
-# -1 \\
-# -1
-# \end{bmatrix}
-# $$
-# 
-# ##### Square Each Difference:
-# 
-# $$
-# \begin{bmatrix}
-# 2^2 \\
-# (-1)^2 \\
-# (-1)^2
-# \end{bmatrix}
-# #### Square Each Difference:
-# 
-# \[
-# \begin{bmatrix}
-# 2^2 \\
-# (-1)^2 \\
-# (-1)^2
-# \end{bmatrix}
-# =
-# \begin{bmatrix}
-# 4 \\
-# 1 \\
-# 1
-# \end{bmatrix}
-# \]
-# 
-# #### Sum the Squared Differences:
-# 
-# \[
-# 4 + 1 + 1 = 6
-# \]
-# 
-# #### Take the Square Root:
-# 
-# $
-# d(A,B) = \sqrt{6} \approx 2.45
-# $
-# 
-# #### Summary of Distances
-# 
-# You can also calculate the distances for the other pairs, \(d(A,C)\) and \(d(B,C)\).
-# 
-# - $ d(A,B) \approx 2.45 $
-# - $ d(A,C) \approx 4.58 $
-# - $ d(B,C) = 3 $
-# 
-# 
-# 
-# 3. **Clustering:**
-#    - Use a clustering algorithm, such as **Agglomerative Clustering**:
-#         - Initialization: Treat each data point (or code) as a single cluster.
-#         - Distance Calculation: Calculate the distance between all clusters using a specified distance metric (e.g., Euclidean distance).
-#         - Merging Clusters: Identify the two closest clusters and merge them into one.
-#         - Repeat: Update the distance matrix to reflect the new cluster structure and repeat the merging process until all points are clustered or the desired number of clusters is achieved.
-# 
-# 4. **Ward's method - Linkage Criteria:**
-#    - Define a linkage criterion (e.g., **Ward's method**) to decide how to merge clusters:
-#      - This minimizes the total within-cluster variance. The distance between clusters can be computed using:
-# 
-# The distance between two clusters \( C_a \) and \( C_b \) in Agglomerative Clustering can be calculated using the following equation:
-# 
-# $$ 
-# D(C_a, C_b) = \frac{1}{|C_a| \times |C_b|} \sum_{i \in C_a, j \in C_b} d(i, j) 
-# $$
-# 
-# 5. **Dendrogram Construction:**
-#    - Construct the dendrogram by plotting the clusters:
-#      - The y-axis represents the distance or dissimilarity, while the x-axis represents the codes.
-#      - Each merge is represented by a horizontal line, connecting the merged clusters.
-# 
-# 
-# 
-
-# In[14]:
-
 
 @app.callback(
     [Output('bar-chart', 'figure'),
@@ -2206,122 +1552,6 @@ def update_charts(selected_code, show_labels, slider_value, codes_of_interest, d
     
     
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8052)
-
-
-
-# In[ ]:
-
-
-
-
-
-# # NODE DEGREE DISTRIBUTION
-
-# In[ ]:
-
-
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import re
-import io
-
-# Use the correct path to read the parquet file
-file_path = 'C:/dataset/FHIR_real_data.parquet'
-flat_df = pd.read_parquet(file_path)
-
-# Continue with the rest of your code
-
-
-# Define resource type functions
-def is_icd_code(code):
-    """Check if the given code is a valid ICD code."""
-    if not isinstance(code, str) or not code:  # Check for string type and non-empty
-        return False
-    return bool(re.match(r"^[A-Z]", code))
-
-def is_loinc_code(code):
-    """Check if the given code is a valid LOINC code with a hyphen at [-2]."""
-    if not isinstance(code, str) or len(code) < 2:  # Check for string type and minimum length
-        return False
-    return code[-2] == '-'
-
-def is_ops_code(code):
-    """Check if the given code is a valid OPS code."""
-    if not isinstance(code, str) or len(code) < 2:  # Check for string type and minimum length
-        return False
-    return code[1] == '-'
-
-def get_resource_type(code):
-    """Determine the resource type based on the code."""
-    if is_icd_code(code):
-        return "ICD"
-    elif is_loinc_code(code):
-        return "LOINC"
-    elif is_ops_code(code):
-        return "OPS"
-    else:
-        return "Unknown"  # Default case for unrecognized codes
-
-
-
-# Create co-occurrence matrices
-def create_co_occurrence_matrix(df):
-    if df.empty:
-        return pd.DataFrame()
-    patient_matrix = df.pivot_table(index='PatientID', columns='Codes', aggfunc='size', fill_value=0)
-    print("patient_matrix:\n", patient_matrix)  # Displaying patient matrix for debugging
-    patient_matrix = patient_matrix.loc[:, (patient_matrix != 0).any(axis=0)]
-    co_occurrence_matrix = patient_matrix.T.dot(patient_matrix)
-    np.fill_diagonal(co_occurrence_matrix.values, 0)  # Filling diagonal with 0
-    return co_occurrence_matrix
-
-# Create co-occurrence matrix from flat_df
-main_df = create_co_occurrence_matrix(flat_df)
-
-# Get the degree for each code from the co-occurrence matrix
-degrees = main_df.sum(axis=1).reset_index()
-degrees.columns = ['Code', 'Degree']  # Renaming for clarity
-
-# Assign resource types to degrees DataFrame using the new function
-degrees['ResourceType'] = degrees['Code'].apply(get_resource_type)
-
-# Extract degree values for each resource type
-icd_degrees = degrees[degrees['ResourceType'] == 'ICD']['Degree']
-loinc_degrees = degrees[degrees['ResourceType'] == 'LOINC']['Degree']
-ops_degrees = degrees[degrees['ResourceType'] == 'OPS']['Degree']
-
-# Combine degrees from all resource types for overall histogram properties
-sorted_degree_values = pd.concat([icd_degrees, loinc_degrees, ops_degrees]).values
-
-# Set fixed bin size for histogram
-bins = np.arange(0, max(sorted_degree_values) + 10, 2)  # Adjusted to accommodate maximum degree
-
-# Plot overlapping histograms for each resource type
-plt.figure(figsize=(10, 6))
-plt.xlim([min(sorted_degree_values) - 15, max(sorted_degree_values) + 15])
-
-
-
-# Plot histograms
-plt.hist(icd_degrees, bins=bins, alpha=0.5, color="#00bfff", label='ICD')
-plt.hist(loinc_degrees, bins=bins, alpha=0.5, color="#ffc0cb", label='LOINC')
-plt.hist(ops_degrees, bins=bins, alpha=0.5, color="#9a31a8", label='OPS')
-
-# Add titles and labels
-plt.title('Node Degree Distribution by Resource Type (Fixed Bin Size)')
-plt.xlabel('Degree')
-plt.ylabel('Count')
-plt.grid(axis='y')  # Optional: Add grid for better visibility
-plt.legend(loc='upper right')  # Add a legend
-
-# Show the plot
-plt.show()
-
-
-# In[ ]:
-
-
+    app.run_server(debug=True, port=8053)
 
 

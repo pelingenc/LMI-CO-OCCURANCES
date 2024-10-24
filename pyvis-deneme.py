@@ -125,7 +125,7 @@ app.layout = html.Div([
             dcc.Input(
                 id='n-input',
                 type='number',
-                value=4,  # Default value for n
+                value=1,  # Default value for n
                 style={'width': '60px'},
                 debounce=False 
             )
@@ -1237,12 +1237,12 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
         node_degree = main_df.astype(bool).sum(axis=1)
         
         # Sort nodes by their degree in descending order and select the top 10
-        top_10_degrees = node_degree.sort_values(ascending=False)[:30]
+        top_10_degrees = node_degree.sort_values(ascending=False)
         print('top_10_degrees', top_10_degrees)
 
         # Get the minimum and maximum degree from the top 10
-        min_weight = top_10_degrees.min()
-        max_weight = top_10_degrees.max()
+        min_weight = top_10_degrees[:num_nodes_to_visualize].min()
+        max_weight = top_10_degrees[:num_nodes_to_visualize].max()
         
         # Get neighbors of the selected code
         if selected_code not in main_df.index:
@@ -1291,34 +1291,56 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
                               'LOINC' if selected_code in co_occurrence_matrices.get('LOINC', {}) else \
                               'OPS' if selected_code in co_occurrence_matrices.get('OPS', {}) else 'Unknown'
 
-                node_size = int(node_degree.get(selected_code, 1))/2
+                node_size = int(node_degree.get(selected_code, 1))
 #                 node_size = normalize_weights(node_size, 
 #                                        gain=5, offset=1, 
 #                                        min_limit=NODE_SIZE_MIN, max_limit=NODE_SIZE_MAX)
 
-                node_size = normalize_weights(
-                    node_size,
-                    gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
-                    offset=NODE_SIZE_MIN,
-                    min_limit=NODE_SIZE_MIN,
-                    max_limit=NODE_SIZE_MAX
-                )
+                # Handle the case where max_weight equals min_weight to avoid division by zero
+                if max_weight == min_weight:
+                    # Set a default value for the gain, e.g., 1, or bypass normalization
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=3,  # Default gain if all weights are the same
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
+                else:
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
 
                #print('selected_code node size', node_size)
                 if selected_code not in net.get_nodes():
                     net.add_node(selected_code, size=node_size, title=flat_df.loc[flat_df['Codes'] == selected_code, 'Full_Displays'].iloc[0], label=selected_code_label, color=SUBGROUP_COLORS.get(group_name1, 'gray'))
 
-                node_size = int(node_degree.get(top_neighbor, 1))/2
+                node_size = int(node_degree.get(top_neighbor, 1))
 #                 node_size = normalize_weights(node_size, 
 #                        gain=5, offset=1, 
 #                        min_limit=NODE_SIZE_MIN, max_limit=NODE_SIZE_MAX)
-                node_size = normalize_weights(
-                    node_size,
-                    gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
-                    offset=NODE_SIZE_MIN,
-                    min_limit=NODE_SIZE_MIN,
-                    max_limit=NODE_SIZE_MAX
-                )
+                # Handle the case where max_weight equals min_weight to avoid division by zero
+                if max_weight == min_weight:
+                    # Set a default value for the gain, e.g., 1, or bypass normalization
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=3,  # Default gain if all weights are the same
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
+                else:
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
                #print('top_neighbor node size', node_size)
                 if top_neighbor not in net.get_nodes():
                     net.add_node(top_neighbor, size=node_size, title=flat_df.loc[flat_df['Codes'] == top_neighbor, 'Full_Displays'].iloc[0], label=top_neighbor_label, color=SUBGROUP_COLORS.get(group_name, 'gray'))
@@ -1339,17 +1361,28 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
                     if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
                         neighbor_label = flat_df.loc[flat_df['Codes'] == neighbor, 'Displays'].iloc[0] if 'show' in show_labels else neighbor
 
-                        node_size = int(node_degree.get(neighbor, 1))/2
+                        node_size = int(node_degree.get(neighbor, 1))
 #                         node_size = normalize_weights(node_size, 
 #                                gain=5, offset=1, 
 #                                min_limit=NODE_SIZE_MIN, max_limit=NODE_SIZE_MAX)  
-                        node_size = normalize_weights(
-                            node_size,
-                            gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
-                            offset=NODE_SIZE_MIN,
-                            min_limit=NODE_SIZE_MIN,
-                            max_limit=NODE_SIZE_MAX
-                        )
+                        # Handle the case where max_weight equals min_weight to avoid division by zero
+                        if max_weight == min_weight:
+                            # Set a default value for the gain, e.g., 1, or bypass normalization
+                            node_size = normalize_weights(
+                                node_size,
+                                gain=3,  # Default gain if all weights are the same
+                                offset=NODE_SIZE_MIN,
+                                min_limit=NODE_SIZE_MIN,
+                                max_limit=NODE_SIZE_MAX
+                            )
+                        else:
+                            node_size = normalize_weights(
+                                node_size,
+                                gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
+                                offset=NODE_SIZE_MIN,
+                                min_limit=NODE_SIZE_MIN,
+                                max_limit=NODE_SIZE_MAX
+                            )
                        #print('neighbor node size', node_size)
                         if neighbor not in net.get_nodes():
                             net.add_node(neighbor, size=node_size, title=flat_df.loc[flat_df['Codes'] == neighbor, 'Full_Displays'].iloc[0], label=neighbor_label, color=SUBGROUP_COLORS.get(group_name, 'gray'))

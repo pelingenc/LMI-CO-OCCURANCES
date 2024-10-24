@@ -77,7 +77,7 @@ app.layout = html.Div([
         [
             dcc.Upload(
                 id='upload-data',
-                children=html.Button('Upload Data', id='upload-button', disabled=True),  # Button disabled initially
+                children=html.Button('Upload Data', id='upload-button', disabled=False),  # Button disabled initially
                 multiple=False,
                 style={'margin-right': '10px'}  # Add some space between button and input
             ),

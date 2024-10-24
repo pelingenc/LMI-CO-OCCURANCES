@@ -324,7 +324,7 @@ def update_slider_visibility(selected_code):
         return {'display': 'block'}, {'display': 'none'}  # Show num-nodes slider, hide level slider
 
     
-def fetch_and_process_data(file_content, icd_df, ops_df, loinc_df):
+def fetch_and_process_data(file_content,datasets_dir):
     
     
 # 1. Read CSV data from uploaded content
@@ -337,6 +337,39 @@ def fetch_and_process_data(file_content, icd_df, ops_df, loinc_df):
     missing_columns = [col for col in required_columns if col not in flat_df.columns]
     if missing_columns:
         raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+
+################################################################################################## 
+# 3. Create Dataset Directory
+#     new_directory_name = "CoCo_Input"
+#     datasets_dir = create_dataset_directory(new_directory_name)
+
+    # Initialize a dictionary to hold the dataframes
+    dataframes = {}
+    file_names = {
+        'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
+        'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
+        'LOINC': 'LOINC_DWH_export_202409230739.csv'
+    }
+
+##################################################################################################
+# 4. Load External Datasets
+    for key, filename in file_names.items():
+        file_path = os.path.join(datasets_dir, filename)
+        try:
+            dataframes[key] = pd.read_csv(file_path)
+        except FileNotFoundError:
+            return {
+                'success': False,
+                'message': (
+                    f"1. Put the catalogue files into the directory: {datasets_dir}\n"
+                    f"2. Refresh the page.\n"
+                    f"3. Upload the data.")
+            }
+
+    # Continue processing with icd_df, ops_df, and loinc_df if needed
+    icd_df = dataframes.get('ICD')
+    ops_df = dataframes.get('OPS')
+    loinc_df = dataframes.get('LOINC')
 
 ##################################################################################################
 # 5. Process DataFrames:
@@ -687,39 +720,12 @@ def upload_file(file_content, directory):
     data = {}
     
     print('file_content',file_content)
-    
-    if datasets_dir: 
-            # Initialize a dictionary to hold the dataframes
-        dataframes = {}
-        file_names = {
-            'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
-            'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
-            'LOINC': 'LOINC_DWH_export_202409230739.csv'
-        }
-
-        for key, filename in file_names.items():
-            file_path = os.path.join(datasets_dir, filename)
-            try:
-                dataframes[key] = pd.read_csv(file_path)
-            except FileNotFoundError:
-                return {
-                    'success': False,
-                    'message': (
-                        f"1. Put the catalogue files into the directory: {datasets_dir}\n"
-                        f"2. Refresh the page.\n"
-                        f"3. Upload the data.")
-                }
-
-        # Continue processing with icd_df, ops_df, and loinc_df if needed
-        icd_df = dataframes.get('ICD')
-        ops_df = dataframes.get('OPS')
-        loinc_df = dataframes.get('LOINC')
 
     if file_content:
         # Decode and process uploaded file
         content_type, content_string = file_content.split(',')
         decoded = base64.b64decode(content_string)
-        result = fetch_and_process_data(decoded, icd_df, ops_df, loinc_df)
+        result = fetch_and_process_data(decoded, datasets_dir)
 
 
         if result['success']:
@@ -760,13 +766,14 @@ def upload_file(file_content, directory):
      Input('num-nodes-slider', 'value'),
      Input('level-slider', 'value'),
      Input('show-labels', 'value'),
-     Input('code-input', 'value'), 
+     Input('code-input', 'value'),  # Add input for user code
      Input('n-input', 'value'),
      State('data-store', 'data')]
 )
 
 
 def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_labels, user_code, n, data):
+  
 
     EDGE_THICKNESS_MIN = 1
     EDGE_THICKNESS_MAX = 32

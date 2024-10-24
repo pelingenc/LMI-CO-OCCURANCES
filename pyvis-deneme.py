@@ -74,13 +74,14 @@ app.layout = html.Div([
                 style={'margin-right': '10px'}  # Add some space between button and input
             ),
             # Input box for the user to specify the directory
-            html.Label('Enter the directory for the catalog files:', style={'margin-right': '10px'}),
-            dcc.Input(
-                id='directory-input',
-                type='text',
-                value='',  # Default value
-                style={'width': '300px'}  # Set a width for the input box
-            ),
+    html.Label('Enter the directory for the catalog files:', style={'margin-right': '10px'}),
+    dcc.Input(
+        id='directory-input',
+        type='text',
+        value='',  # Default value
+        style={'width': '300px'}
+    ),
+    html.Div(id='output-div'),
         ],
         style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'}  # Flexbox for alignment
     ),
@@ -161,7 +162,14 @@ app.layout = html.Div([
     dcc.Store(id='data-store')  # Hidden store to keep data
 ])
 
-
+# Callback to update the directory in real-time as the user types
+@app.callback(
+    Output('output-div', 'children'),  # Update the content of the div
+    Input('directory-input', 'value')  # Triggered whenever the input value changes
+)
+def update_directory(input_value):
+    # Here you can process the input_value (the directory path entered)
+    return f'Put the catalogues under: {input_value}'  # Display it or use it elsewhere in your code
 
 # Create co-occurrence matrices
 def create_co_occurrence_matrix(df):

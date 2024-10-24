@@ -79,8 +79,8 @@ app.layout = html.Div([
                 id='directory-input',
                 type='text',
                 value='',  # Default value
-                style={'width': '300px'},  # Set a width for the input box
-                debounce=False
+                style={'width': '300px'},
+                debounce=False  
             ),
         ],
         style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'}  # Flexbox for alignment
@@ -105,17 +105,32 @@ app.layout = html.Div([
     
     # Slider for the hierarchy levels
     html.Div(id='level-slider-container', children=[
-        html.Label("Select the hierarchy level:"),
-        dcc.Slider(
-            id='level-slider',
-            min=1,
-            max=4,
-            step=1,
-            value=1,
-            marks={i: str(i) for i in range(5)},  # 0 to 4
-            tooltip={"placement": "bottom", "always_visible": False}
-        )
-    ], style={'display': 'none'}),  # Initially hidden 
+        html.Label("Select the hierarchy level:", style={'margin-right': '10px'}),
+        # Wrap the slider in a Div to control the width
+        html.Div(
+            dcc.Slider(
+                id='level-slider',
+                min=1,
+                max=4,
+                step=1,
+                value=1,
+                marks={i: str(i) for i in range(1, 5)},  # 1 to 4
+                tooltip={"placement": "bottom", "always_visible": False}
+            ),
+            style={'width': '300px'}  # Set a custom width for the slider wrapper
+        ),
+        # User input for n next to the slider
+        html.Div(children=[
+            html.Label('Enter value for n, max. number of codes on the leaves of the tree:', style={'margin-left': '10px', 'margin-right': '10px', 'margin-bottom': '5px'}),
+            dcc.Input(
+                id='n-input',
+                type='number',
+                value=1,  # Default value for n
+                style={'width': '60px'},
+                debounce=False 
+            )
+        ], style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'} )  # Flexbox for alignment
+    ], style={'display': 'none'}),  # Initially hidden
     
     html.Div([
         html.Label("Select a code:"),
@@ -309,7 +324,7 @@ def update_slider_visibility(selected_code):
         return {'display': 'block'}, {'display': 'none'}  # Show num-nodes slider, hide level slider
 
     
-def fetch_and_process_data(file_content,datasets_dir):
+def fetch_and_process_data(file_content, icd_df, ops_df, loinc_df):
     
     
 # 1. Read CSV data from uploaded content
@@ -322,39 +337,6 @@ def fetch_and_process_data(file_content,datasets_dir):
     missing_columns = [col for col in required_columns if col not in flat_df.columns]
     if missing_columns:
         raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
-
-################################################################################################## 
-# 3. Create Dataset Directory
-#     new_directory_name = "CoCo_Input"
-#     datasets_dir = create_dataset_directory(new_directory_name)
-
-    # Initialize a dictionary to hold the dataframes
-    dataframes = {}
-    file_names = {
-        'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
-        'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
-        'LOINC': 'LOINC_DWH_export_202409230739.csv'
-    }
-
-##################################################################################################
-# 4. Load External Datasets
-    for key, filename in file_names.items():
-        file_path = os.path.join(datasets_dir, filename)
-        try:
-            dataframes[key] = pd.read_csv(file_path)
-        except FileNotFoundError:
-            return {
-                'success': False,
-                'message': (
-                    f"1. Put the catalogue files into the directory: {datasets_dir}\n"
-                    f"2. Refresh the page.\n"
-                    f"3. Upload the data.")
-            }
-
-    # Continue processing with icd_df, ops_df, and loinc_df if needed
-    icd_df = dataframes.get('ICD')
-    ops_df = dataframes.get('OPS')
-    loinc_df = dataframes.get('LOINC')
 
 ##################################################################################################
 # 5. Process DataFrames:
@@ -705,12 +687,39 @@ def upload_file(file_content, directory):
     data = {}
     
     print('file_content',file_content)
+    
+    if datasets_dir: 
+            # Initialize a dictionary to hold the dataframes
+        dataframes = {}
+        file_names = {
+            'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
+            'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
+            'LOINC': 'LOINC_DWH_export_202409230739.csv'
+        }
+
+        for key, filename in file_names.items():
+            file_path = os.path.join(datasets_dir, filename)
+            try:
+                dataframes[key] = pd.read_csv(file_path)
+            except FileNotFoundError:
+                return {
+                    'success': False,
+                    'message': (
+                        f"1. Put the catalogue files into the directory: {datasets_dir}\n"
+                        f"2. Refresh the page.\n"
+                        f"3. Upload the data.")
+                }
+
+        # Continue processing with icd_df, ops_df, and loinc_df if needed
+        icd_df = dataframes.get('ICD')
+        ops_df = dataframes.get('OPS')
+        loinc_df = dataframes.get('LOINC')
 
     if file_content:
         # Decode and process uploaded file
         content_type, content_string = file_content.split(',')
         decoded = base64.b64decode(content_string)
-        result = fetch_and_process_data(decoded, datasets_dir)
+        result = fetch_and_process_data(decoded, icd_df, ops_df, loinc_df)
 
 
         if result['success']:
@@ -751,13 +760,13 @@ def upload_file(file_content, directory):
      Input('num-nodes-slider', 'value'),
      Input('level-slider', 'value'),
      Input('show-labels', 'value'),
-     Input('code-input', 'value'),  # Add input for user code
+     Input('code-input', 'value'), 
+     Input('n-input', 'value'),
      State('data-store', 'data')]
 )
 
 
-def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_labels, user_code, data):
-  
+def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_labels, user_code, n, data):
 
     EDGE_THICKNESS_MIN = 1
     EDGE_THICKNESS_MAX = 32
@@ -836,7 +845,7 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
 
 # MAX NUMBER OF NODES TO BE SHOWN ON THE LEAFS
 
-        n = 10  # You can change this value to get more or fewer top nodes
+        #n = 10  # You can change this value to get more or fewer top nodes
 
         # Group by ResourceType, sort by Degree in descending order, and take the top 'n' nodes for each group
         top_n_per_resource = node_degrees.groupby('ResourceType').apply(lambda x: x.nlargest(n, 'Degree')).reset_index(drop=True)

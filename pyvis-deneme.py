@@ -121,7 +121,7 @@ app.layout = html.Div([
         ),
         # User input for n next to the slider
         html.Div(children=[
-            html.Label('Enter value for n:', style={'margin-left': '10px', 'margin-right': '10px'}),
+            html.Label('Enter value for n, max. number of codes on the leaves of the tree:', style={'margin-left': '10px', 'margin-right': '10px', 'margin-bottom': '5px'}),
             dcc.Input(
                 id='n-input',
                 type='number',
@@ -129,7 +129,7 @@ app.layout = html.Div([
                 style={'width': '60px'},
                 debounce=False 
             )
-        ], style={'display': 'flex', 'alignItems': 'center'})  # Flexbox for alignment
+        ], style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'} )  # Flexbox for alignment
     ], style={'display': 'none'}),  # Initially hidden
 
 

@@ -69,20 +69,19 @@ app.layout = html.Div([
         [
             dcc.Upload(
                 id='upload-data',
-                children=html.Button('Upload Data', id='upload-button'),  # Button disabled initially
+                children=html.Button('Upload Data'),
                 multiple=False,
                 style={'margin-right': '10px'}  # Add some space between button and input
             ),
             # Input box for the user to specify the directory
-            html.Label('Enter the directory for the catalog files:', style={'margin-right': '10px', 'color': 'red'}),
+            html.Label('Enter the directory for the catalog files:', style={'margin-right': '10px'}),
             dcc.Input(
                 id='directory-input',
                 type='text',
                 value='',  # Default value
                 style={'width': '300px'},
-                debounce=False 
+                debounce=False  
             ),
-            html.Div(id='output-div'),
         ],
         style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'}  # Flexbox for alignment
     ),
@@ -132,8 +131,7 @@ app.layout = html.Div([
             )
         ], style={'display': 'flex', 'alignItems': 'center', 'margin-bottom': '20px'} )  # Flexbox for alignment
     ], style={'display': 'none'}),  # Initially hidden
-
-
+    
     html.Div([
         html.Label("Select a code:"),
         dcc.Dropdown(
@@ -326,7 +324,7 @@ def update_slider_visibility(selected_code):
         return {'display': 'block'}, {'display': 'none'}  # Show num-nodes slider, hide level slider
 
     
-def fetch_and_process_data(file_content, icd_df, ops_df, loinc_df):
+def fetch_and_process_data(file_content,datasets_dir):
     
     
 # 1. Read CSV data from uploaded content
@@ -339,6 +337,39 @@ def fetch_and_process_data(file_content, icd_df, ops_df, loinc_df):
     missing_columns = [col for col in required_columns if col not in flat_df.columns]
     if missing_columns:
         raise ValueError(f"Missing columns: {', '.join(missing_columns)}")
+
+################################################################################################## 
+# 3. Create Dataset Directory
+#     new_directory_name = "CoCo_Input"
+#     datasets_dir = create_dataset_directory(new_directory_name)
+
+    # Initialize a dictionary to hold the dataframes
+    dataframes = {}
+    file_names = {
+        'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
+        'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
+        'LOINC': 'LOINC_DWH_export_202409230739.csv'
+    }
+
+##################################################################################################
+# 4. Load External Datasets
+    for key, filename in file_names.items():
+        file_path = os.path.join(datasets_dir, filename)
+        try:
+            dataframes[key] = pd.read_csv(file_path)
+        except FileNotFoundError:
+            return {
+                'success': False,
+                'message': (
+                    f"1. Put the catalogue files into the directory: {datasets_dir}\n"
+                    f"2. Refresh the page.\n"
+                    f"3. Upload the data.")
+            }
+
+    # Continue processing with icd_df, ops_df, and loinc_df if needed
+    icd_df = dataframes.get('ICD')
+    ops_df = dataframes.get('OPS')
+    loinc_df = dataframes.get('LOINC')
 
 ##################################################################################################
 # 5. Process DataFrames:
@@ -689,39 +720,12 @@ def upload_file(file_content, directory):
     data = {}
     
     print('file_content',file_content)
-    
-    if datasets_dir: 
-            # Initialize a dictionary to hold the dataframes
-        dataframes = {}
-        file_names = {
-            'ICD': 'ICD_Katalog_2023_DWH_export_202406071440.csv',
-            'OPS': 'OPS_Katalog_2023_DWH_export_202409200944.csv',
-            'LOINC': 'LOINC_DWH_export_202409230739.csv'
-        }
-
-        for key, filename in file_names.items():
-            file_path = os.path.join(datasets_dir, filename)
-            try:
-                dataframes[key] = pd.read_csv(file_path)
-            except FileNotFoundError:
-                return {
-                    'success': False,
-                    'message': (
-                        f"1. Put the catalogue files into the directory: {datasets_dir}\n"
-                        f"2. Refresh the page.\n"
-                        f"3. Upload the data.")
-                }
-
-        # Continue processing with icd_df, ops_df, and loinc_df if needed
-        icd_df = dataframes.get('ICD')
-        ops_df = dataframes.get('OPS')
-        loinc_df = dataframes.get('LOINC')
 
     if file_content:
         # Decode and process uploaded file
         content_type, content_string = file_content.split(',')
         decoded = base64.b64decode(content_string)
-        result = fetch_and_process_data(decoded, icd_df, ops_df, loinc_df)
+        result = fetch_and_process_data(decoded, datasets_dir)
 
 
         if result['success']:
@@ -762,7 +766,7 @@ def upload_file(file_content, directory):
      Input('num-nodes-slider', 'value'),
      Input('level-slider', 'value'),
      Input('show-labels', 'value'),
-     Input('code-input', 'value'), 
+     Input('code-input', 'value'),  # Add input for user code
      Input('n-input', 'value'),
      State('data-store', 'data')]
 )
@@ -1233,12 +1237,12 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
         node_degree = main_df.astype(bool).sum(axis=1)
         
         # Sort nodes by their degree in descending order and select the top 10
-        top_10_degrees = node_degree.sort_values(ascending=False)[:30]
+        top_10_degrees = node_degree.sort_values(ascending=False)
         print('top_10_degrees', top_10_degrees)
 
         # Get the minimum and maximum degree from the top 10
-        min_weight = top_10_degrees.min()
-        max_weight = top_10_degrees.max()
+        min_weight = top_10_degrees[:num_nodes_to_visualize].min()
+        max_weight = top_10_degrees[:num_nodes_to_visualize].max()
         
         # Get neighbors of the selected code
         if selected_code not in main_df.index:
@@ -1287,34 +1291,56 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
                               'LOINC' if selected_code in co_occurrence_matrices.get('LOINC', {}) else \
                               'OPS' if selected_code in co_occurrence_matrices.get('OPS', {}) else 'Unknown'
 
-                node_size = int(node_degree.get(selected_code, 1))/2
+                node_size = int(node_degree.get(selected_code, 1))
 #                 node_size = normalize_weights(node_size, 
 #                                        gain=5, offset=1, 
 #                                        min_limit=NODE_SIZE_MIN, max_limit=NODE_SIZE_MAX)
 
-                node_size = normalize_weights(
-                    node_size,
-                    gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
-                    offset=NODE_SIZE_MIN,
-                    min_limit=NODE_SIZE_MIN,
-                    max_limit=NODE_SIZE_MAX
-                )
+                # Handle the case where max_weight equals min_weight to avoid division by zero
+                if max_weight == min_weight:
+                    # Set a default value for the gain, e.g., 1, or bypass normalization
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=3,  # Default gain if all weights are the same
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
+                else:
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
 
                #print('selected_code node size', node_size)
                 if selected_code not in net.get_nodes():
                     net.add_node(selected_code, size=node_size, title=flat_df.loc[flat_df['Codes'] == selected_code, 'Full_Displays'].iloc[0], label=selected_code_label, color=SUBGROUP_COLORS.get(group_name1, 'gray'))
 
-                node_size = int(node_degree.get(top_neighbor, 1))/2
+                node_size = int(node_degree.get(top_neighbor, 1))
 #                 node_size = normalize_weights(node_size, 
 #                        gain=5, offset=1, 
 #                        min_limit=NODE_SIZE_MIN, max_limit=NODE_SIZE_MAX)
-                node_size = normalize_weights(
-                    node_size,
-                    gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
-                    offset=NODE_SIZE_MIN,
-                    min_limit=NODE_SIZE_MIN,
-                    max_limit=NODE_SIZE_MAX
-                )
+                # Handle the case where max_weight equals min_weight to avoid division by zero
+                if max_weight == min_weight:
+                    # Set a default value for the gain, e.g., 1, or bypass normalization
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=3,  # Default gain if all weights are the same
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
+                else:
+                    node_size = normalize_weights(
+                        node_size,
+                        gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
+                        offset=NODE_SIZE_MIN,
+                        min_limit=NODE_SIZE_MIN,
+                        max_limit=NODE_SIZE_MAX
+                    )
                #print('top_neighbor node size', node_size)
                 if top_neighbor not in net.get_nodes():
                     net.add_node(top_neighbor, size=node_size, title=flat_df.loc[flat_df['Codes'] == top_neighbor, 'Full_Displays'].iloc[0], label=top_neighbor_label, color=SUBGROUP_COLORS.get(group_name, 'gray'))
@@ -1335,17 +1361,28 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
                     if neighbor != top_neighbor and child_df.loc[top_neighbor, neighbor] > 0:
                         neighbor_label = flat_df.loc[flat_df['Codes'] == neighbor, 'Displays'].iloc[0] if 'show' in show_labels else neighbor
 
-                        node_size = int(node_degree.get(neighbor, 1))/2
+                        node_size = int(node_degree.get(neighbor, 1))
 #                         node_size = normalize_weights(node_size, 
 #                                gain=5, offset=1, 
 #                                min_limit=NODE_SIZE_MIN, max_limit=NODE_SIZE_MAX)  
-                        node_size = normalize_weights(
-                            node_size,
-                            gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
-                            offset=NODE_SIZE_MIN,
-                            min_limit=NODE_SIZE_MIN,
-                            max_limit=NODE_SIZE_MAX
-                        )
+                        # Handle the case where max_weight equals min_weight to avoid division by zero
+                        if max_weight == min_weight:
+                            # Set a default value for the gain, e.g., 1, or bypass normalization
+                            node_size = normalize_weights(
+                                node_size,
+                                gain=3,  # Default gain if all weights are the same
+                                offset=NODE_SIZE_MIN,
+                                min_limit=NODE_SIZE_MIN,
+                                max_limit=NODE_SIZE_MAX
+                            )
+                        else:
+                            node_size = normalize_weights(
+                                node_size,
+                                gain=(NODE_SIZE_MAX - NODE_SIZE_MIN) / (max_weight - min_weight),
+                                offset=NODE_SIZE_MIN,
+                                min_limit=NODE_SIZE_MIN,
+                                max_limit=NODE_SIZE_MAX
+                            )
                        #print('neighbor node size', node_size)
                         if neighbor not in net.get_nodes():
                             net.add_node(neighbor, size=node_size, title=flat_df.loc[flat_df['Codes'] == neighbor, 'Full_Displays'].iloc[0], label=neighbor_label, color=SUBGROUP_COLORS.get(group_name, 'gray'))
@@ -1553,5 +1590,4 @@ def update_charts(selected_code, show_labels, slider_value, codes_of_interest, d
     
 if __name__ == '__main__':
     app.run_server(debug=True, port=8053)
-
 

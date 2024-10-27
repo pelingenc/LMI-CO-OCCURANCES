@@ -1241,8 +1241,8 @@ def update_graph(selected_code, num_nodes_to_visualize, selected_level, show_lab
         print('top_10_degrees', top_10_degrees)
 
         # Get the minimum and maximum degree from the top 10
-        min_weight = top_10_degrees[:num_nodes_to_visualize].min()
-        max_weight = top_10_degrees[:num_nodes_to_visualize].max()
+        min_weight = top_10_degrees.min()
+        max_weight = top_10_degrees.max()
         
         # Get neighbors of the selected code
         if selected_code not in main_df.index:
